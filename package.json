@@ -1,0 +1,27 @@
+{
+  "name": "@koretex/node",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Koretex provider node-agent and one-command installer. This is the code that runs on your Mac when you join Koretex as a provider — fully open for audit.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/koretex-ai/koretex-node"
+  },
+  "scripts": {
+    "agent": "tsx src/node-agent/cli.ts",
+    "pair": "tsx src/node-agent/cli.ts pair",
+    "bundle": "esbuild src/node-agent/cli.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/koretex-agent.cjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "esbuild": "^0.28.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
