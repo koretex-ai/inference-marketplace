@@ -1,0 +1,1146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Koretex</title>
+<link rel="icon" type="image/svg+xml" href="/koretex-favicon.svg" />
+<style>
+  :root{
+    --ink:#1D1D1F; --soft:#6E6E73; --line:#D9DCE3;
+    --blue:#2E6BE6; --indigo:#6A4BE0; --violet:#9B3FD4; --pink:#D6428F; --green:#1FB57A; --red:#D23B3B;
+    --cta1:#3A7BF0; --cta2:#8B4BE6;
+    --sans:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue",Inter,system-ui,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{font-family:var(--sans);color:var(--ink);background:#FBFCFF;-webkit-font-smoothing:antialiased;line-height:1.5;min-height:100vh}
+  #bgwash{position:fixed;inset:0;z-index:0;background:linear-gradient(160deg,#EAF1FF 0%,#F1ECFF 55%,#FBEFF6 100%)}
+  a{color:var(--indigo);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  /* ---- nav ---- */
+  nav{position:fixed;top:0;left:0;right:0;z-index:30;height:56px;display:flex;align-items:center;justify-content:space-between;
+      padding:0 22px;backdrop-filter:saturate(160%) blur(14px);background:rgba(251,252,255,.7);border-bottom:1px solid rgba(217,220,227,.6)}
+  .brand{font-weight:600;font-size:19px;letter-spacing:-.02em;color:var(--ink);display:inline-flex;align-items:center;gap:10px;text-decoration:none}
+  .brand:hover{text-decoration:none}
+  .brand .logo{height:24px;width:24px;border-radius:7px;box-shadow:0 4px 12px rgba(110,90,230,.32);display:block}
+  .brand b{font-weight:inherit;color:inherit}
+  .walletbar{display:flex;align-items:center;gap:10px;position:relative}
+  .waddr{font-family:var(--mono);font-size:13px;color:var(--ink);background:rgba(255,255,255,.7);border:1px solid var(--line);border-radius:980px;padding:7px 13px}
+  .waddr i{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block;margin-right:7px;vertical-align:middle}
+
+  .btn{font-family:var(--sans);font-size:14px;font-weight:600;border:none;border-radius:980px;padding:9px 18px;cursor:pointer;text-decoration:none;display:inline-block;
+       transition:transform .15s ease,box-shadow .2s ease,opacity .2s,background .2s}
+  .btn:hover{text-decoration:none}
+  .btn-grad{color:#fff;background:linear-gradient(90deg,var(--cta1),var(--cta2));box-shadow:0 6px 20px rgba(110,90,230,.30)}
+  .btn-grad:hover{transform:translateY(-1px);box-shadow:0 10px 26px rgba(110,90,230,.40)}
+  .btn-ghost{color:var(--ink);background:rgba(255,255,255,.6);border:1px solid var(--line)}
+  .btn-ghost:hover{background:rgba(0,0,0,.04)}
+  .btn-sm{font-size:13px;padding:7px 14px}
+  .btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+  /* segmented control (e.g. Demand time window) */
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:rgba(255,255,255,.6)}
+  .seg button{appearance:none;border:0;background:transparent;color:var(--soft);font:inherit;font-size:13px;font-weight:600;padding:7px 16px;cursor:pointer}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button.active{background:var(--ink);color:#fff}
+
+  .menu{position:absolute;top:46px;right:0;background:#fff;border:1px solid var(--line);border-radius:16px;padding:8px;
+        box-shadow:0 18px 50px rgba(60,70,120,.18);display:none;flex-direction:column;gap:6px;min-width:230px;z-index:40}
+  .menu.open{display:flex}
+  .menu button{justify-content:flex-start;text-align:left;width:100%}
+  .menu .hint{font-size:12px;color:var(--soft);padding:4px 8px}
+
+  /* ---- tab bar ---- */
+  .tabs{position:fixed;top:56px;left:0;right:0;z-index:20;display:flex;gap:4px;padding:8px 16px;overflow-x:auto;
+        backdrop-filter:saturate(160%) blur(14px);background:rgba(251,252,255,.55);border-bottom:1px solid rgba(217,220,227,.5)}
+  .tabs button{font-family:var(--sans);font-size:14px;font-weight:600;color:var(--soft);background:transparent;border:none;border-radius:980px;
+               padding:8px 16px;cursor:pointer;white-space:nowrap;transition:.15s}
+  .tabs button:hover{color:var(--ink);background:rgba(0,0,0,.04)}
+  .tabs button.active{color:#fff;background:linear-gradient(90deg,var(--cta1),var(--cta2));box-shadow:0 5px 16px rgba(110,90,230,.26)}
+
+  /* ---- layout ---- */
+  main{position:relative;z-index:2;max-width:920px;margin:0 auto;padding:128px 22px 80px}
+  .panel{display:none;animation:fade .35s ease}
+  .panel.active{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  h1{font-weight:700;letter-spacing:-.03em;font-size:clamp(26px,4vw,38px);line-height:1.08}
+  h2{font-weight:700;letter-spacing:-.02em;font-size:clamp(19px,2.4vw,23px);margin-top:30px}
+  h3{font-weight:600;letter-spacing:-.01em;font-size:16px}
+  .sub{color:var(--soft);font-size:16px;margin-top:6px;max-width:60ch}
+  .eyebrow{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+    background:linear-gradient(90deg,var(--blue),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:8px}
+  .grad{background:linear-gradient(90deg,var(--blue),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent}
+
+  /* ---- cards ---- */
+  .card{background:rgba(255,255,255,.74);border:1px solid var(--line);border-radius:20px;padding:22px 24px;margin-top:18px;backdrop-filter:blur(6px)}
+  .cards{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:18px}
+  .cards-3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:760px){.cards-3{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:520px){.cards-3{grid-template-columns:1fr}}
+  .stat{background:rgba(255,255,255,.74);border:1px solid var(--line);border-radius:18px;padding:18px 20px;backdrop-filter:blur(6px)}
+  .stat .n{font-size:30px;font-weight:700;letter-spacing:-.03em;background:linear-gradient(90deg,var(--blue),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .stat .l{color:var(--soft);font-size:13px;margin-top:4px}
+
+  /* ---- forms / inputs ---- */
+  label{display:block;font-size:12px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--soft);margin:14px 0 7px}
+  input{font-family:var(--sans);font-size:15px;width:100%;border:1px solid var(--line);border-radius:12px;padding:11px 14px;background:#fff;color:var(--ink)}
+  input:focus{outline:none;border-color:var(--indigo)}
+  .preview{font-size:14px;color:var(--soft);margin:8px 0 12px}
+
+  /* ---- tables ---- */
+  table{width:100%;border-collapse:collapse;margin-top:12px;font-size:14px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--soft);font-weight:600;font-size:12px;letter-spacing:.02em;text-transform:uppercase}
+  .cmd-table td{vertical-align:top}
+  .cmd-table td:first-child{white-space:nowrap;width:1%;padding-right:18px}
+  .cmd-table code{font-family:var(--mono);font-size:13px}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  td.mono,.addr{font-family:var(--mono);font-size:13px;word-break:break-all}
+
+  /* ---- misc ---- */
+  .msg{margin-top:14px;padding:12px 15px;border-radius:12px;font-size:14px;white-space:pre-wrap}
+  .ok{background:rgba(31,181,122,.14);border:1px solid rgba(31,181,122,.3)}
+  .err{background:rgba(210,59,59,.12);border:1px solid rgba(210,59,59,.28)}
+  .info{background:rgba(58,123,240,.10);border:1px solid rgba(106,75,224,.22)}
+  .note{color:var(--soft);font-size:13px;margin-top:14px}
+  .tier{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:980px;border:1px solid currentColor}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:7px;vertical-align:middle;background:var(--green)}
+  .codeblock{background:linear-gradient(160deg,#0E1117,#171a2b);color:#E6E9F2;border-radius:14px;padding:14px 16px;font-family:var(--mono);font-size:13px;overflow-x:auto;display:flex;gap:10px;align-items:center;margin-top:10px}
+  .codeblock code{flex:1;white-space:nowrap;overflow-x:auto;color:#C0CAF5}
+  .gate{text-align:center;padding:30px 10px}
+  .gate p{color:var(--soft);margin-bottom:16px}
+  .hidden{display:none !important}
+  ul.bullets{list-style:none;margin-top:12px;display:flex;flex-direction:column;gap:9px}
+  ul.bullets li{position:relative;padding-left:22px;font-size:15px}
+  ul.bullets li:before{content:"";position:absolute;left:0;top:8px;width:8px;height:8px;border-radius:50%;background:linear-gradient(90deg,var(--blue),var(--violet))}
+  .formula{font-family:var(--mono);font-size:14px;background:rgba(58,123,240,.07);border:1px solid rgba(106,75,224,.18);border-radius:12px;padding:14px 16px;margin-top:12px;overflow-x:auto}
+  select{font-family:var(--sans);font-size:15px;width:100%;border:1px solid var(--line);border-radius:12px;padding:11px 14px;background:#fff;color:var(--ink);appearance:none;cursor:pointer}
+  select:focus{outline:none;border-color:var(--indigo)}
+  input[type=range]{width:100%;accent-color:var(--indigo);margin-top:4px}
+  .calc-grid{display:grid;gap:14px 16px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-top:4px}
+  .calc-grid label{margin:0 0 6px}
+  .calc-result{margin-top:20px;padding-top:18px;border-top:1px solid var(--line)}
+  .calc-big{font-size:40px;font-weight:700;letter-spacing:-.03em}
+  .calc-unit{font-size:15px;color:var(--soft);font-weight:400}
+  .calc-break{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-top:16px}
+  .calc-break .k{color:var(--soft);font-size:12px}
+  .calc-break .v{font-weight:700;font-variant-numeric:tabular-nums;font-size:16px;margin-top:2px}
+  @media(max-width:600px){ main{padding:122px 16px 70px} .card{padding:18px} }
+
+  /* ---- alpha modal ---- */
+  .modal-overlay{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;padding:20px;
+    background:rgba(20,22,40,.42);backdrop-filter:blur(4px);animation:fade .25s ease}
+  .modal-overlay.open{display:flex}
+  .modal{background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:22px;padding:30px 28px;max-width:30rem;width:100%;
+    box-shadow:0 24px 70px rgba(40,30,90,.28);backdrop-filter:blur(10px);text-align:left}
+  .modal .badge{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+    color:#fff;background:linear-gradient(90deg,var(--cta1),var(--cta2));border-radius:980px;padding:4px 12px;margin-bottom:14px}
+  .modal h2{margin-top:0;font-size:22px}
+  .modal p{color:var(--soft);font-size:15px;margin-top:10px}
+  .modal ul.bullets{margin-top:14px}
+  .modal .btn{margin-top:22px;width:100%}
+
+  /* ---- footer ---- */
+  .footer{position:relative;z-index:2;max-width:920px;margin:0 auto;padding:26px 22px 46px;display:flex;flex-wrap:wrap;gap:8px 18px;
+    align-items:center;justify-content:center;color:var(--soft);font-size:13px;border-top:1px solid rgba(217,220,227,.5)}
+  .footer a{color:var(--soft);display:inline-flex;align-items:center;gap:7px}
+  .footer a:hover{color:var(--indigo);text-decoration:none}
+  .footer a svg{width:16px;height:16px;display:block}
+  /* Inline info tooltips (hover on desktop, tap to toggle on touch) */
+  .info{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;margin-left:5px;border-radius:50%;
+    border:1px solid var(--line);color:var(--soft);background:#fff;font:700 10px/1 var(--sans);font-style:normal;text-transform:none;cursor:help;
+    vertical-align:middle;position:relative}
+  .info:hover,.info.open{color:var(--blue);border-color:var(--blue)}
+  .info::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 9px);right:0;width:230px;
+    background:linear-gradient(135deg,var(--blue),var(--indigo));color:#fff;
+    font:400 12px/1.45 var(--sans);text-transform:none;text-align:left;letter-spacing:.005em;padding:10px 12px;border-radius:11px;box-shadow:0 10px 26px rgba(46,107,230,.35);
+    opacity:0;visibility:hidden;transform:translateY(4px);transition:opacity .12s,transform .12s;z-index:60;pointer-events:none;white-space:normal}
+  .info::before{content:"";position:absolute;bottom:calc(100% + 4px);right:5px;border:5px solid transparent;border-top-color:var(--indigo);
+    opacity:0;visibility:hidden;transition:opacity .12s;z-index:60}
+  .info:hover::after,.info.open::after{opacity:1;visibility:visible;transform:translateY(0)}
+  .info:hover::before,.info.open::before{opacity:1;visibility:visible}
+  /* Playground: chat + code samples */
+  .codeblock.block{display:block}
+  .codeblock.block code{flex:none;white-space:pre;display:block;overflow-x:auto}
+  .langtabs{display:flex;gap:6px;margin:10px 0 0}
+  .langtabs button{font:600 13px var(--sans);color:var(--soft);background:transparent;border:1px solid var(--line);border-radius:980px;padding:5px 13px;cursor:pointer}
+  .langtabs button.active{color:#fff;background:var(--ink);border-color:var(--ink)}
+  .chatlog{display:flex;flex-direction:column;gap:10px;max-height:380px;min-height:90px;overflow-y:auto;padding:8px 2px;margin:8px 0}
+  .chatlog .empty{color:var(--soft);font-size:14px;margin:auto;text-align:center}
+  .bubble{max-width:86%;padding:10px 13px;border-radius:14px;font-size:14px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+  .bubble.user{align-self:flex-end;background:linear-gradient(135deg,var(--blue),var(--violet));color:#fff;border-bottom-right-radius:4px}
+  .bubble.bot{align-self:flex-start;background:#F1F3F9;color:var(--ink);border-bottom-left-radius:4px}
+  .composer{display:flex;gap:10px;align-items:flex-end;margin-top:6px}
+  .composer textarea{font-family:var(--sans);font-size:15px;flex:1;min-height:46px;max-height:150px;border:1px solid var(--line);border-radius:12px;padding:11px 14px;background:#fff;color:var(--ink);resize:vertical}
+  .composer textarea:focus{outline:none;border-color:var(--indigo)}
+  .keyrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
+  .keyrow input{flex:1;min-width:200px;width:auto}
+</style>
+</head>
+<body>
+  <div id="bgwash"></div>
+
+  <nav>
+    <a class="brand" href="/"><img class="logo" src="/koretex-favicon.svg" alt="Koretex" width="24" height="24" /><span>Kore<b>tex</b></span></a>
+    <div class="walletbar">
+      <span class="waddr hidden" id="waddr"></span>
+      <button class="btn btn-ghost btn-sm hidden" id="disconnectBtn">Sign out</button>
+      <button class="btn btn-grad" id="connectBtn">Login with Google</button>
+    </div>
+  </nav>
+
+  <div class="tabs" id="tabbar">
+    <button data-tab="dashboard">Dashboard</button>
+    <button data-tab="playground">Playground</button>
+    <button data-tab="credits">Credits</button>
+    <button data-tab="models">Models</button>
+    <button data-tab="demand">Demand</button>
+    <button data-tab="leaderboard">Leaderboard</button>
+    <button data-tab="points">Points</button>
+    <button data-tab="run">Run a node</button>
+  </div>
+
+  <main>
+    <!-- ================= DASHBOARD ================= -->
+    <section class="panel" id="tab-dashboard">
+      <span class="eyebrow">Your account</span>
+      <h1>Dashboard</h1>
+      <p class="sub">Your nodes, earnings, and Koretex Points — for the account you connect.</p>
+      <div id="dashGate" class="gate card"><p>Log in to see your dashboard.</p><button class="btn btn-grad connect-cta">Login with Google</button></div>
+      <div id="dashBody" class="hidden">
+        <div class="cards">
+          <div class="stat"><div class="n" id="d_jobs">—</div><div class="l">jobs served</div></div>
+          <div class="stat"><div class="n" id="d_tokens">—</div><div class="l">tokens served</div></div>
+          <div class="stat"><div class="n" id="d_usd">—</div><div class="l">credits earned</div></div>
+          <div class="stat"><div class="n" id="d_points">—</div><div class="l">points <span id="d_live" style="font-size:11px"></span></div></div>
+        </div>
+
+        <h2>Points &amp; reputation <span class="note" style="font-weight:400">— how each node earns</span></h2>
+        <div class="card" style="padding:6px 18px">
+          <table id="d_rep"><thead><tr><th>Node</th>
+            <th class="num">Uptime<span class="info" data-tip="Share of time your node was up and serving, from health checks ~1/min. It sets how fast you earn — more uptime earns faster. Downtime only pauses earning; it never removes points.">i</span></th>
+            <th class="num">Tok/s<span class="info" data-tip="Generation speed (tokens/sec) the network actually measures during health-check probes — not your spec sheet. Averaged across your models; drives the Hardware term.">i</span></th>
+            <th class="num">Hardware<span class="info" data-tip="√(tok/s) — your measured throughput, square-root curved so gains taper. A bonus on top of the base rate: faster hardware earns more per minute of uptime.">i</span></th>
+            <th class="num">Model value<span class="info" data-tip="√(real tokens served) × model variety × authenticity. Demand from real customer jobs only — health-check probes don't count — so it stays 0 until paid traffic flows to your node.">i</span></th>
+            <th class="num">Trust<span class="info" data-tip="Anti-abuse ramp: new nodes start at 10% weight and climb to 100% over ~14 days of clean history. Multiplies your points, so throwaway nodes aren't worth it.">i</span></th>
+            <th class="num">Points<span class="info" data-tip="Your score = trust × ( uptime credits × (base rate + hardware) + model value ). It accumulates while you're up and is never deducted for downtime.">i</span></th>
+          </tr></thead><tbody></tbody></table>
+        </div>
+        <p class="note">Points reward uptime, measured hardware throughput, and serving authentic in-demand models — gated by a trust ramp that grows with history. <a href="#points" class="tablink" data-tab="points">How points work →</a></p>
+
+        <h2>Your nodes (live)</h2>
+        <div class="card" style="padding:6px 18px">
+          <table id="d_nodes"><thead><tr><th>Node</th><th>Hardware</th><th>Serving</th><th class="num">In-flight</th></tr></thead><tbody></tbody></table>
+        </div>
+
+        <h2>By model</h2>
+        <div class="card" style="padding:6px 18px">
+          <table id="d_bymodel"><thead><tr><th>Model</th><th class="num">Jobs</th><th class="num">Tokens</th></tr></thead><tbody></tbody></table>
+        </div>
+
+        <h2>Recent jobs</h2>
+        <div class="card" style="padding:6px 18px">
+          <table id="d_recent"><thead><tr><th>When</th><th>Model</th><th class="num">Tokens</th></tr></thead><tbody></tbody></table>
+        </div>
+        <p class="note">Only metadata is shown — Koretex never stores the prompts or responses your node processes.</p>
+        <div id="dashOut"></div>
+      </div>
+    </section>
+
+    <!-- ================= CREDITS ================= -->
+    <section class="panel" id="tab-credits">
+      <span class="eyebrow">Pay for inference</span>
+      <h1>Credits</h1>
+      <p class="sub">Add credits to your balance. Credits are how you pay for inference. Create API keys and test the API in the <a href="#playground" class="tablink" data-tab="playground">Playground</a>.</p>
+      <div id="crGate" class="gate card"><p>Log in to buy and manage credits.</p><button class="btn btn-grad connect-cta">Login with Google</button></div>
+      <div id="crBody" class="hidden">
+        <div class="card">
+          <div style="font-size:34px;font-weight:700;letter-spacing:-.03em"><span class="grad" id="cr_balance">—</span> <span style="font-size:15px;color:var(--soft);font-weight:400">credits</span></div>
+          <p class="addr note" id="cr_who"></p>
+          <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" id="cr_refresh">Refresh</button>
+            <a href="#" id="cr_scan" class="note" style="font-size:13px">Bought credits but don't see them? Re-check</a>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Top up</h3>
+          <label for="cr_amount">Amount (USD)</label>
+          <input id="cr_amount" type="number" min="0" step="0.01" value="10" inputmode="decimal" />
+          <div class="preview" id="cr_preview"></div>
+          <button class="btn btn-grad" id="cr_buy">Add credits</button>
+          <div id="cr_buyout"></div>
+        </div>
+
+        <div class="card">
+          <h3>Recent purchases</h3>
+          <table id="cr_history"><thead><tr><th>When</th><th class="num">USD</th><th class="num">Credits</th><th>Receipt</th></tr></thead><tbody></tbody></table>
+        </div>
+        <div id="crOut"></div>
+      </div>
+    </section>
+
+    <!-- ================= PLAYGROUND ================= -->
+    <section class="panel" id="tab-playground">
+      <span class="eyebrow">Try the network</span>
+      <h1>Playground</h1>
+      <p class="sub">Get an API key, chat with a model that's live on the network, and copy ready-to-run code. Calls are billed to your credits.</p>
+      <div id="plGate" class="gate card"><p>Log in to get an API key and start chatting.</p><button class="btn btn-grad connect-cta">Login with Google</button></div>
+      <div id="plBody" class="hidden">
+        <div class="card">
+          <h3>Your API key</h3>
+          <p class="note" style="margin-top:4px">Used as <code>Authorization: Bearer …</code>. A key is shown once — it's kept in this browser tab so the chat and samples below can use it. <span id="pl_bal" class="note"></span></p>
+          <div class="keyrow">
+            <button class="btn btn-grad btn-sm" id="pl_create">Create API key</button>
+            <span class="note">or</span>
+            <input id="pl_paste" placeholder="paste an existing key (sk-…)" autocomplete="off" spellcheck="false" />
+            <button class="btn btn-ghost btn-sm" id="pl_use">Use</button>
+          </div>
+          <div id="pl_keyout"></div>
+          <table id="pl_keys" style="margin-top:12px"><thead><tr><th>Key</th><th>Label</th><th>Created</th></tr></thead><tbody></tbody></table>
+        </div>
+
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h3 style="margin:0">Chat</h3><button class="btn btn-ghost btn-sm" id="pl_clear">Clear chat</button></div>
+          <label for="pl_model">Model</label>
+          <select id="pl_model"></select>
+          <div id="pl_chat" class="chatlog"><div class="empty">Pick a model and say hello 👋</div></div>
+          <div class="composer">
+            <textarea id="pl_input" placeholder="Ask something…" rows="2"></textarea>
+            <button class="btn btn-grad" id="pl_send">Send</button>
+          </div>
+          <div id="pl_chatout"></div>
+        </div>
+
+        <div class="card">
+          <h3>Use the API</h3>
+          <p class="note" style="margin-top:4px">OpenAI-compatible. Base URL <code id="pl_base" class="mono"></code> — point any OpenAI SDK at it with your key.</p>
+          <div class="langtabs" id="pl_langtabs">
+            <button data-lang="curl" class="active">curl</button>
+            <button data-lang="python">Python</button>
+            <button data-lang="js">JavaScript</button>
+          </div>
+          <div class="codeblock block" style="margin-top:8px"><code id="pl_code">—</code></div>
+          <button class="btn btn-ghost btn-sm" id="pl_copy" style="margin-top:10px">Copy</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= MODELS ================= -->
+    <section class="panel" id="tab-models">
+      <span class="eyebrow">Available now</span>
+      <h1>Models</h1>
+      <p class="sub">What the network is serving right now. Call any of these with an OpenAI-compatible request to <code>/v1/chat/completions</code>.</p>
+      <div class="card" style="padding:6px 18px">
+        <table id="m_table"><thead><tr><th>Model</th><th class="num">Nodes</th><th class="num" title="Points multiplier — heavier models earn more points per token served">Points ×</th><th class="num">Credits / 1M</th><th class="num">Price / 1M</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="note" id="m_summary">Loading…</div>
+      <button class="btn btn-ghost btn-sm" id="m_refresh" style="margin-top:14px">Refresh</button>
+    </section>
+
+    <!-- ================= DEMAND ================= -->
+    <section class="panel" id="tab-demand">
+      <span class="eyebrow">What customers want</span>
+      <h1>Demand</h1>
+      <p class="sub">Which models the network is actually being asked for. <b>Provider tip:</b> serve an under-supplied model in demand to capture it — you can serve <em>any</em> model with <code>koretex models add &lt;tag&gt;</code>, not just our curated list.</p>
+      <div class="seg" id="dm_window" style="margin-bottom:12px">
+        <button data-days="1">24h</button><button data-days="7" class="active">7d</button><button data-days="30">30d</button>
+      </div>
+      <div class="card" style="padding:6px 18px">
+        <table id="dm_table">
+          <thead><tr>
+            <th>Model</th>
+            <th class="num" title="Completion tokens served in the window — the demand signal">Demand (tokens)</th>
+            <th class="num" title="Customer requests in the window">Jobs</th>
+            <th class="num" title="Nodes serving this model right now (supply)">Nodes</th>
+            <th class="num" title="What the model earns now — credits per 1M tokens">Price / 1M</th>
+            <th class="num" title="Average price providers have requested for this model">Requested</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="note" id="dm_summary">Loading…</div>
+      <button class="btn btn-ghost btn-sm" id="dm_refresh" style="margin-top:14px">Refresh</button>
+    </section>
+
+    <!-- ================= LEADERBOARD ================= -->
+    <section class="panel" id="tab-leaderboard">
+      <span class="eyebrow">Provider ranks</span>
+      <h1>Leaderboard</h1>
+      <p class="sub">Climb by keeping nodes up, running great hardware, and serving the best models. Rank is earned — uptime and quality count, raw volume doesn't.</p>
+      <div class="card" style="padding:6px 18px">
+        <table id="lb_table"><thead><tr><th>#</th><th>Provider</th><th>Tier</th><th class="num">Points</th><th class="num">Tok/s</th><th class="num">Nodes</th><th class="num">Jobs</th><th class="num">Tokens</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div style="margin-top:14px;display:flex;align-items:center;gap:14px;font-size:13px">
+        <button class="btn btn-ghost btn-sm" id="lb_refresh">Refresh</button>
+        <label style="text-transform:none;letter-spacing:0;margin:0;font-weight:400;color:var(--soft)"><input type="checkbox" id="lb_auto" checked style="width:auto"> Live</label>
+        <span id="lb_updated" style="color:var(--soft)"></span>
+      </div>
+    </section>
+
+    <!-- ================= POINTS ================= -->
+    <section class="panel" id="tab-points">
+      <span class="eyebrow">How it works</span>
+      <h1>Koretex Points</h1>
+      <p class="sub">Points reward the providers who make the network great: nodes that stay online, run quality hardware, and serve the best, genuine models — designed so being a good provider is the only way to climb. Your standing also influences how much real traffic routes to your nodes.</p>
+
+      <h2>What earns points</h2>
+      <div class="cards">
+        <div class="card"><h3>🟢 Uptime &amp; reliability</h3><p class="note" style="margin-top:6px">We continuously health-check every node with real workloads. Consistent availability and completed work counts — not just being switched on.</p></div>
+        <div class="card"><h3>⚡ Hardware quality</h3><p class="note" style="margin-top:6px">We <em>measure</em> what your machine delivers — throughput under load — not a spec sheet. Faster hardware that serves bigger models well earns more, with tapering returns.</p></div>
+        <div class="card"><h3>🧠 Model authenticity</h3><p class="note" style="margin-top:6px">Serving in-demand models earns more, and we verify a node really runs the model it claims. Swapping in a cheaper model is detected and penalised.</p></div>
+      </div>
+
+      <h2>How it fits together</h2>
+      <div class="formula">points += <b class="grad">uptime</b> × ( <b class="grad">hardware</b> + <b class="grad">model&nbsp;value</b> ) × <b class="grad">trust</b> − penalties</div>
+      <ul class="bullets">
+        <li><b>Uptime sets your earning rate</b> — points <em>accumulate</em> the whole time you're up &amp; serving. The more uptime, the faster they add up; an outage just pauses earning — it never takes back points you've already banked.</li>
+        <li><b>Hardware + model value add up</b> — a strong machine, plus serving authentic models people want, earns more per unit of uptime.</li>
+        <li><b>Trust ramps with time</b> — new nodes start limited and grow into full standing, so throwaway nodes are pointless.</li>
+        <li><b>Penalties subtract</b> — a fake model or repeated failed checks cost you; repeat offenders are removed.</li>
+      </ul>
+
+      <h2>How each part is calculated</h2>
+      <p class="note">Beyond the high-level formula, here's exactly what drives each term — and the live constants we use today.</p>
+      <div class="cards cards-3">
+        <div class="card"><h3>Uptime — your earning rate</h3><p class="note" style="margin-top:6px">Every minute your node is up &amp; serving (verified by unannounced health checks ~1/min) banks an <em>uptime credit</em>. Points accrue against those credits, so more uptime means you earn faster — and going offline only pauses earning, it never deducts points you've already banked.</p></div>
+        <div class="card"><h3>Hardware — measured throughput</h3><p class="note" style="margin-top:6px">From the tokens/sec your node actually generates under load (not your spec sheet), curved as <b>√(tok/s)</b> so returns taper — going 20→80 tok/s is about <b>2×</b> the hardware term, not 4×. Bigger, faster Macs win, just sub-linearly. A faster engine (e.g. MLX) measures higher here.</p></div>
+        <div class="card"><h3>Model value — demand × model size × diversity × authenticity</h3><p class="note" style="margin-top:6px"><b>√(tokens you served × model weight)</b>, so it scales with real demand <em>and</em> with how heavy the model is — a token on a big model is worth more than one on a small model (heavy models are scarcer and cost far more memory). The <b>weight</b> runs ~0.5× for a 3B up to ~4.4× for a 235B; see each model's <b>×pts</b> on the <a href="#models" class="tablink" data-tab="models">Models</a> tab. <b>+<span id="p_div">10</span>%</b> per extra in-demand model you serve. If a health check catches you serving a different model than you claim, this collapses to <b><span id="p_authfloor">5</span>%</b>.</p></div>
+        <div class="card"><h3>Trust — the ramp (<span id="p_trustfloor">10</span>% → 100%)</h3><p class="note" style="margin-top:6px">New nodes start at <span id="p_trustfloor2">10</span>% weight and ramp to full over ~<b><span id="p_trustdays">14</span> days</b> of clean history. This makes mass-producing throwaway nodes pointless — standing is earned over time.</p></div>
+        <div class="card"><h3>Per-operator diminishing returns</h3><p class="note" style="margin-top:6px">Across one account's nodes, the best counts full, the 2nd ~85%, the 3rd ~72%… so running more good hardware still helps, just sub-linearly. One large farm can't crowd everyone out.</p></div>
+        <div class="card"><h3>Penalties</h3><p class="note" style="margin-top:6px">Serving a fake model or repeatedly failing checks subtracts points directly; persistent offenders are removed from the network and hidden from the board.</p></div>
+      </div>
+
+      <h2>Estimate your points</h2>
+      <p class="note">A rough daily projection from your hardware and setup. Real points depend on live demand and your <em>measured</em> throughput — treat this as a ballpark, not a promise.</p>
+      <div class="card" id="calc">
+        <div class="calc-grid">
+          <div><label>Chip generation</label><select id="calc_chip"><option>M1</option><option>M2</option><option selected>M3</option><option>M4</option></select></div>
+          <div><label>Tier</label><select id="calc_tier"><option value="base">Base</option><option value="Pro" selected>Pro</option><option value="Max">Max</option><option value="Ultra">Ultra</option></select></div>
+          <div><label>Unified memory</label><select id="calc_ram"><option>16</option><option selected>32</option><option>48</option><option>64</option><option>96</option><option>128</option><option>192</option></select></div>
+          <div><label>Model you'll serve</label><select id="calc_model"><option>Loading…</option></select></div>
+          <div><label>Hours online / day · <b id="calc_hours_v">18</b></label><input type="range" id="calc_hours" min="1" max="24" value="18" /></div>
+          <div><label>Network demand</label><select id="calc_demand"><option value="0.05">Low (early alpha)</option><option value="0.15" selected>Medium</option><option value="0.3">High</option></select></div>
+          <div><label>Running for · <b id="calc_days_v">14</b> days</label><input type="range" id="calc_days" min="0" max="30" value="14" /></div>
+        </div>
+        <div class="calc-result">
+          <div class="calc-big"><span class="grad" id="calc_points">—</span> <span class="calc-unit">est. points / day</span></div>
+          <div id="calc_warn"></div>
+          <div class="calc-break" id="calc_break"></div>
+        </div>
+      </div>
+
+      <h2>How we measure it</h2>
+      <ul class="bullets">
+        <li><b>Live health checks.</b> Roughly every minute the network sends your node a real inference request — identical to a customer's — measuring reachability, throughput, and whether it's truly running the claimed model.</li>
+        <li><b>Verifying the model.</b> Checks use a fixed prompt with deterministic settings; nodes running the same model produce the same answer. Disagree, and you're flagged.</li>
+        <li><b>Credited to you.</b> Every request is routed to one node and tracked by a unique id it returns — so attribution is exact, never guessed.</li>
+      </ul>
+
+      <div class="card" style="border-color:rgba(106,75,224,.35);background:rgba(106,75,224,.06)">
+        <h3>This system will evolve 🔧</h3>
+        <p class="note" style="margin-top:6px">Points are provisional and will change as we tune each signal against real data. Every contribution is recorded in a permanent history, so when the methodology improves we can re-evaluate fairly. The principles are stable — reward uptime, hardware, and genuine models; make gaming pointless — but the details will keep getting sharper.</p>
+      </div>
+      <p class="note">See the live <a href="#leaderboard" class="tablink" data-tab="leaderboard">leaderboard</a>, or open your <a href="#dashboard" class="tablink" data-tab="dashboard">dashboard</a> for a per-node breakdown of your score.</p>
+    </section>
+
+    <!-- ================= RUN A NODE ================= -->
+    <section class="panel" id="tab-run">
+      <span class="eyebrow">Earn from your Mac</span>
+      <h1>Run a node</h1>
+      <p class="sub">Rent your Apple Silicon Mac's idle time to run AI inference. You earn Koretex Points for the work your node does — with withdrawal coming in the future.</p>
+
+      <div class="card">
+        <h3>How it works</h3>
+        <ol style="padding-left:1.1rem;margin-top:10px;color:var(--ink)">
+          <li>Connect your account — it's your node's identity and where your points accrue.</li>
+          <li>Copy the one-line command it gives you and paste it into Terminal on your Mac.</li>
+          <li>Your Mac auto-starts, serves requests, and earns. Track it on your <a href="#dashboard" class="tablink" data-tab="dashboard">dashboard</a>.</li>
+        </ol>
+        <p class="note">Requires an Apple Silicon Mac (16GB+). Your account's secret never leaves your device — you only sign a message to prove ownership.</p>
+      </div>
+
+      <div class="card">
+        <h3>1 · Log in &amp; approve the signature</h3>
+        <p class="note" style="margin:4px 0 12px">Once you <b>Login with Google</b>, approve the one-time wallet signature and your personalised install command appears below. (Use the button if you need to regenerate it.)</p>
+        <button class="btn btn-grad" id="run_enroll" disabled>Log in first</button>
+        <div id="run_out"></div>
+        <div id="run_cmdbox" class="hidden">
+          <p style="margin:14px 0 0;font-weight:600">2 · Run this on your Mac — paste into Terminal:</p>
+          <div class="codeblock"><code id="run_cmd">—</code><button class="btn btn-ghost btn-sm" id="run_copy" style="background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.2)">Copy</button></div>
+          <p class="note">Linked to <span class="addr" id="run_who"></span> — earnings go here. Keep this command private; it contains your node token.</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Control it from Terminal</h3>
+        <p class="note" style="margin:4px 0 12px">After setup, manage your node with the <code>koretex</code> command — open a new Terminal window and run:</p>
+        <table class="cmd-table">
+          <tr><td><code>koretex status</code></td><td class="note">Show your wallet link, whether you're serving, and which models are loaded.</td></tr>
+          <tr><td><code>koretex models</code></td><td class="note">Open the interactive model picker — shows every model that fits your Mac with its <b>×pts</b> multiplier and <b>$/1M</b>, sorted best-earner first, and pulls the ones you choose.</td></tr>
+          <tr><td><code>koretex models ls</code></td><td class="note">List what you're serving now, what else your Mac can run, and what needs a bigger Mac — each with its <b>×pts</b> and <b>$/1M</b>.</td></tr>
+          <tr><td><code>koretex models add &lt;tag&gt;</code></td><td class="note">Pull and start serving one or more models, e.g. <code>koretex models add qwen3:14b gpt-oss:20b</code>. Live as soon as the download finishes.</td></tr>
+          <tr><td><code>koretex models rm &lt;tag&gt;</code></td><td class="note">Stop serving and delete one or more models to free up disk.</td></tr>
+          <tr><td><code>koretex stop</code></td><td class="note">Pause serving (your banked points stay — downtime never deducts them).</td></tr>
+          <tr><td><code>koretex start</code></td><td class="note">Resume serving after a stop.</td></tr>
+          <tr><td><code>koretex pair</code></td><td class="note">Re-link this Mac to a wallet (opens Phantom in your browser). The installer does this once during setup — run it again only to move the node to a different wallet.</td></tr>
+        </table>
+        <p class="note" style="margin-top:12px">More models served = more demand you can earn from, plus a diversity bonus. Pick the highest <b>×pts</b> models your Mac can comfortably run.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>© Koretex</span>
+    <a href="https://discord.gg/6Re5H6revg" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.369A19.79 19.79 0 0 0 15.432 3c-.21.375-.455.88-.624 1.28a18.27 18.27 0 0 0-5.617 0A12.4 12.4 0 0 0 8.56 3a19.74 19.74 0 0 0-4.886 1.37C.59 8.978-.27 13.47.16 17.9a19.93 19.93 0 0 0 6.034 3.07c.486-.66.92-1.36 1.292-2.096a12.93 12.93 0 0 1-2.035-.98c.171-.126.338-.257.5-.39a14.24 14.24 0 0 0 12.098 0c.164.137.33.268.5.39-.65.385-1.334.714-2.038.98.372.737.805 1.437 1.291 2.097a19.9 19.9 0 0 0 6.037-3.07c.5-5.14-.838-9.59-3.522-13.531ZM8.02 15.331c-1.182 0-2.157-1.085-2.157-2.42 0-1.333.955-2.42 2.157-2.42 1.21 0 2.176 1.096 2.157 2.42 0 1.335-.955 2.42-2.157 2.42Zm7.975 0c-1.183 0-2.157-1.085-2.157-2.42 0-1.333.955-2.42 2.157-2.42 1.21 0 2.176 1.096 2.157 2.42 0 1.335-.946 2.42-2.157 2.42Z"/></svg>
+      Join our Discord
+    </a>
+  </footer>
+
+  <!-- ================= CLOSED ALPHA MODAL ================= -->
+  <div class="modal-overlay" id="alphaModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="alphaTitle">
+      <span class="badge">Closed alpha</span>
+      <h2 id="alphaTitle">You're very early 👋</h2>
+      <p>Koretex is in a closed alpha. Thanks for being here at the start — a quick heads-up on what that means:</p>
+      <ul class="bullets">
+        <li>Things can and very likely <b>will</b> break.</li>
+        <li>We're iterating rapidly — features, numbers, and flows may change without notice.</li>
+        <li>Expect rough edges, occasional downtime, and the odd reset while we tune things.</li>
+      </ul>
+      <p>Your early feedback genuinely shapes what we build next. Thanks for bearing with us.</p>
+      <button class="btn btn-grad" id="alphaDismiss">Got it — let's go</button>
+    </div>
+  </div>
+
+<script src="/wallet.js"></script>
+<script type="module">
+  // Solana libs are only needed to BUY credits — lazy-load them so a slow/blocked CDN never breaks
+  // tab switching or any other tab.
+  let _sol = null;
+  async function sol() {
+    if (_sol) return _sol;
+    const [web3, spl] = await Promise.all([
+      import("https://esm.sh/@solana/web3.js@1.95.3"),
+      import("https://esm.sh/@solana/spl-token@0.4.8?deps=@solana/web3.js@1.95.3"),
+    ]);
+    _sol = { ...web3, ...spl };
+    return _sol;
+  }
+
+  const W = window.KoretexWallet;
+  const $ = (id) => document.getElementById(id);
+  const fmt = (n) => Number(n).toLocaleString();
+  const show = (el, cls, text) => { el.innerHTML = '<div class="msg ' + cls + '">' + text + '</div>'; };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // ---------------------------------------------------------------- closed-alpha notice
+  // Shown once, the first time someone connects — so they know they're early and things may break.
+  const ALPHA_SEEN_KEY = "kx_alpha_seen";
+  function maybeShowAlpha() {
+    try { if (localStorage.getItem(ALPHA_SEEN_KEY)) return; } catch {}
+    $("alphaModal").classList.add("open");
+  }
+  function dismissAlpha() {
+    $("alphaModal").classList.remove("open");
+    try { localStorage.setItem(ALPHA_SEEN_KEY, "1"); } catch {}
+  }
+  $("alphaDismiss").addEventListener("click", dismissAlpha);
+  $("alphaModal").addEventListener("click", (e) => { if (e.target === $("alphaModal")) dismissAlpha(); });
+
+  // ---------------------------------------------------------------- shared wallet state
+  let address = null;
+  const walletSubs = [];
+  const onWallet = (cb) => walletSubs.push(cb);
+
+  function setAddress(addr) {
+    address = addr;
+    const connected = !!addr;
+    $("connectBtn").classList.toggle("hidden", connected);
+    $("waddr").classList.toggle("hidden", !connected);
+    $("disconnectBtn").classList.toggle("hidden", !connected);
+    if (connected) $("waddr").innerHTML = '<i></i>' + addr.slice(0, 5) + "…" + addr.slice(-4);
+    if (connected) maybeShowAlpha();
+    walletSubs.forEach((f) => { try { f(addr); } catch (e) { console.error(e); } });
+  }
+
+  // Login with Google → routes to the Phantom embedded wallet (Google sign-in creates/opens the
+  // wallet). The direct-wallet path (Phantom extension) is intentionally hidden.
+  async function loginGoogle() {
+    try { sessionStorage.setItem("kx_return_tab", currentTab); } catch {}
+    try { await W.connectGoogle("/"); } catch (e) { alert((e && e.message) || e); }
+  }
+  $("connectBtn").addEventListener("click", loginGoogle);
+  document.querySelectorAll(".connect-cta").forEach((b) => b.addEventListener("click", loginGoogle));
+  $("disconnectBtn").addEventListener("click", () => { try { Credits.clearSession(); } catch {} setAddress(null); });
+
+  // ---------------------------------------------------------------- tab routing
+  const PATH_TAB = { "/": "dashboard", "/dashboard": "dashboard", "/playground": "playground", "/credits": "credits", "/models": "models", "/demand": "demand", "/leaderboard": "leaderboard", "/points": "points", "/provider": "run" };
+  const inited = {};
+  let currentTab = "dashboard";
+  const tabBtns = [...document.querySelectorAll("#tabbar button")];
+
+  function selectTab(name, push) {
+    if (!document.getElementById("tab-" + name)) name = "dashboard";
+    currentTab = name;
+    tabBtns.forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+    document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + name));
+    if (push && location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
+    if (!inited[name] && TAB_INIT[name]) { inited[name] = true; TAB_INIT[name](); }
+    // Open the Playground on any nav path (button/link/hash) once logged in.
+    if (name === "playground" && address && $("plBody").classList.contains("hidden")) Play.open();
+  }
+  tabBtns.forEach((b) => b.addEventListener("click", () => selectTab(b.dataset.tab, true)));
+  document.querySelectorAll(".tablink").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); selectTab(a.dataset.tab, true); }));
+  window.addEventListener("hashchange", () => selectTab(location.hash.slice(1), false));
+
+  // ===================================================================== MODELS
+  const Models = {
+    async load() {
+      $("m_summary").textContent = "Loading…";
+      try {
+        const d = await (await fetch("/models/live")).json();
+        const tb = document.querySelector("#m_table tbody");
+        tb.innerHTML = d.models.length
+          ? d.models.map((m) => `<tr><td class="mono">${m.id}</td><td class="num">${m.nodes}</td><td class="num">×${(m.pointsWeight ?? 1).toFixed(2)}</td><td class="num">${fmt(m.creditsPerMTok)}</td><td class="num">$${m.usdPerMTok.toFixed(2)}</td></tr>`).join("")
+          : `<tr><td colspan="5" style="color:var(--soft)">No models online right now.</td></tr>`;
+        $("m_summary").innerHTML = `<span class="dot"></span>${d.nodes} node${d.nodes === 1 ? "" : "s"} online · billed per token in credits (buy them on the <a href="#credits" class="tablink2" data-tab="credits">Credits</a> tab) · <b>Points ×</b> is the reputation multiplier for serving that model — heavier models pay more`;
+        document.querySelectorAll(".tablink2").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); selectTab(a.dataset.tab, true); }));
+      } catch (e) { $("m_summary").innerHTML = `<div class="msg err">Couldn’t load models: ${e.message}</div>`; }
+    },
+  };
+  $("m_refresh").addEventListener("click", () => Models.load());
+
+  // ===================================================================== DEMAND
+  const Demand = {
+    days: 7,
+    async load() {
+      $("dm_summary").textContent = "Loading…";
+      try {
+        const d = await (await fetch("/models/demand?days=" + Demand.days)).json();
+        const tb = document.querySelector("#dm_table tbody");
+        const rows = d.models || [];
+        tb.innerHTML = rows.length
+          ? rows.map((m) => {
+              const tag = m.curated
+                ? `<span class="tier" style="color:var(--green)" title="In our curated catalog">curated</span>`
+                : `<span class="tier" style="color:#8A8F9C" title="Community model — a provider added it, not in our list">community</span>`;
+              const priceCell = `$${m.usdPerMTok.toFixed(2)}` + (m.priced ? "" : ` <span class="note" title="No set price — billed at the default rate">(default)</span>`);
+              const reqCell = (m.proposedUsdAvg != null)
+                ? `$${m.proposedUsdAvg.toFixed(2)} <span class="note">(${m.proposals})</span>`
+                : `<span style="color:var(--soft)">—</span>`;
+              return `<tr>`
+                + `<td><span class="mono">${m.model}</span> ${tag}</td>`
+                + `<td class="num">${fmt(m.completionTokens)}</td>`
+                + `<td class="num">${fmt(m.jobs)}</td>`
+                + `<td class="num">${m.nodes}</td>`
+                + `<td class="num">${priceCell}</td>`
+                + `<td class="num">${reqCell}</td>`
+                + `</tr>`;
+            }).join("")
+          : `<tr><td colspan="6" style="color:var(--soft)">No demand yet in this window.</td></tr>`;
+        $("dm_summary").innerHTML = `<span class="dot"></span>Demand = completion tokens served over the last ${d.windowDays} day${d.windowDays === 1 ? "" : "s"}. <b>Requested</b> = average price providers have proposed (count in parens). Want a model served? Just request it on <a href="#models" class="tablink3" data-tab="models">Models</a> — supply follows demand.`;
+        document.querySelectorAll(".tablink3").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); selectTab(a.dataset.tab, true); }));
+      } catch (e) { $("dm_summary").innerHTML = `<div class="msg err">Couldn’t load demand: ${e.message}</div>`; }
+    },
+  };
+  [...document.querySelectorAll("#dm_window button")].forEach((b) =>
+    b.addEventListener("click", () => {
+      document.querySelectorAll("#dm_window button").forEach((x) => x.classList.toggle("active", x === b));
+      Demand.days = Number(b.dataset.days) || 7;
+      Demand.load();
+    }));
+  $("dm_refresh").addEventListener("click", () => Demand.load());
+
+  // ===================================================================== LEADERBOARD
+  const Leaderboard = {
+    started: false, lastLoad: Date.now(),
+    short: (w) => w.length > 12 ? w.slice(0, 5) + "…" + w.slice(-4) : w,
+    medal: (r) => r === 1 ? "🥇" : r === 2 ? "🥈" : r === 3 ? "🥉" : r,
+    tier: (p) => p >= 500 ? ["Diamond", "#6A4BE0"] : p >= 200 ? ["Platinum", "#2E6BE6"] : p >= 75 ? ["Gold", "#C7951B"] : p >= 20 ? ["Silver", "#8A8F9C"] : ["Bronze", "#A1663B"],
+    async load() {
+      try {
+        const d = await (await fetch("/leaderboard/data?limit=100")).json();
+        const tb = document.querySelector("#lb_table tbody");
+        tb.innerHTML = d.rows.length ? d.rows.map((r) => {
+          const [label, color] = Leaderboard.tier(r.points);
+          return `<tr><td>${Leaderboard.medal(r.rank)}</td><td class="mono">${Leaderboard.short(r.owner)}</td>`
+            + `<td><span class="tier" style="color:${color}">${label}</span></td>`
+            + `<td class="num">${fmt(r.points.toFixed(1))}</td><td class="num">${Math.round(r.tokensPerSec || 0)}</td>`
+            + `<td class="num">${fmt(r.nodes)}</td><td class="num">${fmt(r.jobs)}</td><td class="num">${fmt(r.units)}</td></tr>`;
+        }).join("") : `<tr><td colspan="8" style="color:var(--soft)">No ranked providers yet — be the first to connect a node.</td></tr>`;
+        Leaderboard.lastLoad = Date.now();
+        $("lb_updated").textContent = "updated just now";
+      } catch (e) { $("lb_updated").textContent = "load failed"; }
+    },
+    init() {
+      Leaderboard.load();
+      setInterval(() => { if ($("lb_auto").checked && currentTab === "leaderboard") Leaderboard.load(); }, 12000);
+      setInterval(() => { const s = Math.round((Date.now() - Leaderboard.lastLoad) / 1000); $("lb_updated").textContent = s < 2 ? "updated just now" : `updated ${s}s ago`; }, 1000);
+      $("lb_refresh").addEventListener("click", () => Leaderboard.load());
+    },
+  };
+
+  // ===================================================================== DASHBOARD
+  const Dash = {
+    session: null, pointsTimer: null,
+    async load() {
+      $("dashGate").classList.add("hidden"); $("dashBody").classList.remove("hidden");
+      try {
+        const ch = await (await fetch("/provider/challenge")).json();
+        const { address: addr, signature } = await W.signMessageBase64(ch.message);
+        const res = await fetch("/provider/stats", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey: addr, nonce: ch.nonce, signature }) });
+        const d = await res.json();
+        if (!res.ok) throw new Error((d.error && d.error.message) || "Could not load stats.");
+        Dash.render(d);
+        if (d.session) { Dash.session = d.session; Dash.startLive(); }
+      } catch (e) { show($("dashOut"), "err", (e && e.message) || String(e)); }
+    },
+    render(d) {
+      $("d_jobs").textContent = fmt(d.jobs);
+      $("d_tokens").textContent = fmt(d.completionTokens);
+      $("d_usd").textContent = fmt(d.creditsEarned || 0) + " credits";
+      Dash.renderPoints(d.points);
+      const short = (s) => s ? (s.length > 20 ? s.slice(0, 18) + "…" : s) : "—";
+      const hwLabel = (hw, backend) => {
+        if (!hw) return "—";
+        const parts = [hw.chip, hw.ramGb ? hw.ramGb + "GB" : null, hw.macosVersion ? "macOS " + hw.macosVersion : null].filter(Boolean);
+        let s = parts.length ? parts.join(" · ") : "—";
+        if (backend && backend !== "unknown") s += " · " + backend;
+        return s;
+      };
+      const live = d.liveNodes || [];
+      document.querySelector("#d_nodes tbody").innerHTML = live.length
+        ? live.map((n) => `<tr><td class="mono">${short(n.nodeId)}</td><td>${hwLabel(n.hw, n.backend)}</td><td>${(n.models && n.models.length) ? n.models.join(", ") : "—"}</td><td class="num">${n.inflight}</td></tr>`).join("")
+        : `<tr><td colspan="4" style="color:var(--soft)">No nodes online. Start one from the Run a node tab, or run <code>koretex start</code> on your Mac.</td></tr>`;
+      document.querySelector("#d_bymodel tbody").innerHTML = d.byModel.length
+        ? d.byModel.map((m) => `<tr><td>${m.model}</td><td class="num">${fmt(m.jobs)}</td><td class="num">${fmt(m.completionTokens)}</td></tr>`).join("")
+        : `<tr><td colspan="3" style="color:var(--soft)">No jobs yet.</td></tr>`;
+      document.querySelector("#d_recent tbody").innerHTML = d.recent.length
+        ? d.recent.map((r) => `<tr><td>${new Date(r.at).toLocaleString()}</td><td>${r.model || "—"}</td><td class="num">${fmt(r.completionTokens)}</td></tr>`).join("")
+        : `<tr><td colspan="3" style="color:var(--soft)">No jobs yet — once your node serves requests they'll appear here.</td></tr>`;
+    },
+    renderPoints(pts) {
+      pts = pts || { points: 0, nodes: [] };
+      $("d_points").textContent = fmt(Number(pts.points || 0).toFixed(1));
+      const pct = (x) => Math.round((x || 0) * 100) + "%";
+      document.querySelector("#d_rep tbody").innerHTML = (pts.nodes && pts.nodes.length)
+        ? pts.nodes.map((n) => `<tr><td class="mono">${n.nodeId.length > 20 ? n.nodeId.slice(0, 18) + "…" : n.nodeId}</td><td class="num">${pct(n.uptimeFactor)}</td><td class="num">${Math.round(n.tokensPerSec || 0)}</td><td class="num">${(n.hardwareCapability || 0).toFixed(1)}</td><td class="num">${(n.modelValue || 0).toFixed(1)}</td><td class="num">${pct(n.trustRamp)}</td><td class="num">${(n.points || 0).toFixed(1)}</td></tr>`).join("")
+        : `<tr><td colspan="7" style="color:var(--soft)">No scored activity yet — points appear once your node serves jobs and passes health checks.</td></tr>`;
+    },
+    startLive() {
+      if (Dash.pointsTimer) return;
+      const live = $("d_live");
+      const tick = async () => {
+        if (!Dash.session || !address) return;
+        try {
+          const res = await fetch("/points/live", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey: address, session: Dash.session }) });
+          const d = await res.json();
+          if (!res.ok) { if (res.status === 401) { Dash.session = null; live.textContent = ""; } return; }
+          Dash.renderPoints(d.points);
+          live.textContent = "● live"; live.style.color = "var(--green)";
+        } catch {}
+      };
+      Dash.pointsTimer = setInterval(tick, 10000); tick();
+    },
+    reset() {
+      if (Dash.pointsTimer) { clearInterval(Dash.pointsTimer); Dash.pointsTimer = null; }
+      Dash.session = null;
+      $("dashBody").classList.add("hidden"); $("dashGate").classList.remove("hidden"); $("dashOut").innerHTML = "";
+    },
+  };
+
+  // ===================================================================== CREDITS
+  const Credits = {
+    cfg: null, conn: null, session: null,
+    state: { balance: 0, purchases: [], keys: [] },
+    sessKey: (a) => "koretex_sess_" + a,
+    loadStored(a) { try { const s = JSON.parse(sessionStorage.getItem(Credits.sessKey(a)) || "null"); return (s && s.token && s.expiresAt > Date.now()) ? s : null; } catch { return null; } },
+    saveSession(s) { Credits.session = s; try { sessionStorage.setItem(Credits.sessKey(address), JSON.stringify(s)); } catch {} },
+    clearSession() { if (address) try { sessionStorage.removeItem(Credits.sessKey(address)); } catch {} Credits.session = null; },
+    // Config (the credit peg, RPC path) is a tiny fast fetch — no Solana libs needed to show a
+    // balance. The heavy web3 Connection is only built lazily when actually buying (ensureConn).
+    async ensureCfg() { if (Credits.cfg) return; Credits.cfg = await (await fetch("/credits/config")).json(); },
+    async ensureConn() { await Credits.ensureCfg(); if (Credits.conn) return; const { Connection } = await sol(); Credits.conn = new Connection(location.origin + Credits.cfg.rpc, "confirmed"); },
+    async signCredits() { const ch = await (await fetch("/provider/challenge?for=credits")).json(); const { signature } = await W.signMessageBase64(ch.message); return { nonce: ch.nonce, signature }; },
+    async ensureSession(interactive) {
+      if (Credits.session && Credits.session.expiresAt > Date.now() + 5000) return Credits.session.token;
+      const stored = Credits.loadStored(address);
+      if (stored) { Credits.session = stored; return stored.token; }
+      if (!interactive) return null;
+      const { nonce, signature } = await Credits.signCredits();
+      const res = await fetch("/credits/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey: address, nonce, signature }) });
+      const d = await res.json();
+      if (!res.ok) throw new Error((d.error && d.error.message) || "Could not start an account session.");
+      Credits.saveSession({ token: d.token, expiresAt: d.expiresAt });
+      return d.token;
+    },
+    async gatedPost(path, extra, interactive) {
+      const send = (token) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey: address, session: token, ...(extra || {}) }) });
+      let token = await Credits.ensureSession(interactive);
+      if (!token) throw Object.assign(new Error("needs-auth"), { needsAuth: true });
+      let res = await send(token);
+      if (res.status === 401) { Credits.clearSession(); if (!interactive) throw Object.assign(new Error("needs-auth"), { needsAuth: true }); res = await send(await Credits.ensureSession(true)); }
+      return res;
+    },
+    renderPreview() { if (!Credits.cfg) return; const usd = parseFloat($("cr_amount").value) || 0; $("cr_preview").textContent = "≈ " + fmt(Math.floor(usd * Credits.cfg.creditsPerUsdc)) + " credits  ($1 = " + Credits.cfg.creditsPerUsdc + " credits)"; },
+    renderBalance(d) {
+      Credits.state = { balance: d.balance, purchases: d.purchases || Credits.state.purchases, keys: d.keys || Credits.state.keys };
+      $("cr_balance").textContent = fmt(Credits.state.balance);
+      const tb = document.querySelector("#cr_history tbody");
+      const rows = Credits.state.purchases || [];
+      tb.innerHTML = rows.length ? rows.map((p) => { const sig = p.signature; const short = sig.slice(0, 6) + "…" + sig.slice(-6); return `<tr><td>${new Date(p.at).toLocaleString()}</td><td class="num">$${(p.usdcRaw / 1e6).toFixed(2)}</td><td class="num">${fmt(p.credits)}</td><td><a href="https://solscan.io/tx/${sig}" target="_blank" rel="noopener" class="mono">${short}</a></td></tr>`; }).join("") : `<tr><td colspan="4" style="color:var(--soft)">No purchases yet.</td></tr>`;
+    },
+    async loadBalance(interactive = true) { const res = await Credits.gatedPost("/credits/balance", null, interactive); const d = await res.json(); if (!res.ok) throw new Error((d.error && d.error.message) || "Could not load balance."); Credits.renderBalance(d); },
+    async open() {
+      $("crGate").classList.add("hidden"); $("crBody").classList.remove("hidden");
+      $("cr_who").textContent = address;
+      $("cr_balance").textContent = "…"; $("crOut").innerHTML = "";
+      try { await Credits.ensureCfg(); Credits.renderPreview(); } catch {}
+      // Load the balance immediately (fast DB read). interactive=true opens a session on first use
+      // (one signature, seamless with the embedded wallet) and caches it, so it shows by default.
+      try { await Credits.loadBalance(true); }
+      catch (e) { $("cr_balance").textContent = "—"; if (e && e.needsAuth) show($("crOut"), "info", "Hit “Refresh” to load your balance."); else show($("crOut"), "err", (e && e.message) || String(e)); }
+    },
+    // Fast: re-reads the balance + history from the DB. (Not the on-chain scan.)
+    async refresh() {
+      const btn = $("cr_refresh"); btn.disabled = true; const prev = btn.textContent; btn.textContent = "…";
+      try { await Credits.loadBalance(true); $("crOut").innerHTML = ""; }
+      catch (e) { show($("crOut"), "err", (e && e.message) || String(e)); }
+      finally { btn.disabled = false; btn.textContent = prev; }
+    },
+    // Slow: re-scans the chain via Helius for deposits the fast path missed. Only needed if a
+    // purchase doesn't show up — kept behind a separate link so the default flow stays instant.
+    async scanDeposits(ev) {
+      if (ev) ev.preventDefault();
+      const link = $("cr_scan"); const prev = link.textContent; link.textContent = "Re-checking…";
+      try { const res = await Credits.gatedPost("/credits/refresh", null, true); const d = await res.json(); if (!res.ok) throw new Error((d.error && d.error.message) || "Re-check failed."); Credits.renderBalance(d); show($("crOut"), d.found ? "ok" : "info", d.found ? `Credited ${d.found} new payment(s).` : "No new payments found."); }
+      catch (e) { show($("crOut"), "err", (e && e.message) || String(e)); }
+      finally { link.textContent = prev; }
+    },
+    async buy() {
+      const usd = parseFloat($("cr_amount").value);
+      if (!(usd > 0)) return show($("cr_buyout"), "err", "Enter an amount greater than 0.");
+      const btn = $("cr_buy"); btn.disabled = true;
+      try {
+        await Credits.ensureConn();
+        const { PublicKey, Transaction, getAssociatedTokenAddressSync, createTransferCheckedInstruction, createAssociatedTokenAccountIdempotentInstruction } = await sol();
+        const mint = new PublicKey(Credits.cfg.usdcMint), owner = new PublicKey(address), admin = new PublicKey(Credits.cfg.adminWallet);
+        const fromAta = getAssociatedTokenAddressSync(mint, owner), toAta = getAssociatedTokenAddressSync(mint, admin);
+        const amountRaw = BigInt(Math.round(usd * 1e6));
+        show($("cr_buyout"), "info", "Preparing your payment… approve it in your account.");
+        const tx = new Transaction().add(createAssociatedTokenAccountIdempotentInstruction(owner, toAta, admin, mint), createTransferCheckedInstruction(fromAta, mint, toAta, owner, amountRaw, 6));
+        tx.feePayer = owner; tx.recentBlockhash = (await Credits.conn.getLatestBlockhash("confirmed")).blockhash;
+        const { signature } = await W.signAndSendTransaction(tx);
+        show($("cr_buyout"), "info", "Sent. Confirming your payment — this can take a few seconds…");
+        let credited = null, lastErr = "";
+        for (let i = 0; i < 12; i++) {
+          const res = await fetch("/credits/verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey: address, signature }) });
+          const d = await res.json();
+          if (res.ok) { credited = d; break; }
+          lastErr = (d.error && d.error.message) || "verification pending"; await sleep(2500);
+        }
+        if (!credited) show($("cr_buyout"), "info", "Payment sent but not confirmed yet (" + lastErr + ").\nIt's safe — hit “Refresh balance” in a moment to claim it.");
+        else {
+          show($("cr_buyout"), "ok", (credited.alreadyRecorded ? "Already credited" : "Credited") + " " + fmt(credited.credits) + " credits for $" + credited.usdc.toFixed(2) + ".");
+          const purchases = Credits.state.purchases.slice();
+          if (!purchases.some((p) => p.signature === signature)) purchases.unshift({ signature, usdcRaw: Math.round(credited.usdc * 1e6), credits: credited.credits, at: Date.now() });
+          Credits.renderBalance({ balance: credited.balance, purchases });
+        }
+      } catch (e) { show($("cr_buyout"), "err", (e && e.message) || String(e)); }
+      finally { btn.disabled = false; }
+    },
+    reset() { Credits.clearSession(); $("crBody").classList.add("hidden"); $("crGate").classList.remove("hidden"); $("crOut").innerHTML = ""; },
+  };
+  $("cr_amount").addEventListener("input", () => Credits.renderPreview());
+  $("cr_refresh").addEventListener("click", () => Credits.refresh());
+  $("cr_scan").addEventListener("click", (e) => Credits.scanDeposits(e));
+  $("cr_buy").addEventListener("click", () => Credits.buy());
+
+  // ===================================================================== PLAYGROUND
+  const Play = {
+    models: [], keys: [], lang: "curl", key: null, messages: [], streaming: false,
+    keyKey: () => "kx_apikey_" + address,
+    loadStoredKey() { try { return sessionStorage.getItem(Play.keyKey()); } catch { return null; } },
+    setKey(k) { Play.key = k || null; try { if (k) sessionStorage.setItem(Play.keyKey(), k); } catch {} Play.renderKeyState(); Play.renderSamples(); },
+    baseUrl: () => location.origin + "/v1",
+    async open() {
+      $("plGate").classList.add("hidden"); $("plBody").classList.remove("hidden");
+      $("pl_base").textContent = Play.baseUrl();
+      Play.key = Play.loadStoredKey();
+      Play.renderKeyState();
+      await Play.loadModels();
+      Play.renderSamples();
+      Play.loadKeysAndBalance(); // non-blocking; opens a session (one signature) to read keys+balance
+    },
+    async loadModels() {
+      try {
+        const d = await (await fetch("/models/live")).json();
+        Play.models = d.models || [];
+        $("pl_model").innerHTML = Play.models.length
+          ? Play.models.map((m) => `<option value="${m.id}">${m.id}</option>`).join("")
+          : `<option value="">No models online right now</option>`;
+      } catch { $("pl_model").innerHTML = `<option value="">Couldn’t load models</option>`; }
+    },
+    async loadKeysAndBalance() {
+      try {
+        const res = await Credits.gatedPost("/credits/balance", null, true); const d = await res.json();
+        if (!res.ok) return;
+        Play.keys = d.keys || [];
+        Play.renderKeyList();
+        $("pl_bal").textContent = "Balance: " + fmt(d.balance) + " credits.";
+      } catch (e) { /* needs-auth — user can still create a key, which prompts to sign */ }
+    },
+    renderKeyList() {
+      const tb = document.querySelector("#pl_keys tbody"); const rows = Play.keys || [];
+      tb.innerHTML = rows.length ? rows.map((k) => `<tr><td class="mono">${k.masked}</td><td>${k.label || "—"}</td><td>#${k.createdAt}</td></tr>`).join("") : `<tr><td colspan="3" style="color:var(--soft)">No keys yet — create one above.</td></tr>`;
+    },
+    renderKeyState() {
+      $("pl_send").disabled = !Play.key;
+      $("pl_input").placeholder = Play.key ? "Ask something…" : "Create or paste an API key above to chat…";
+    },
+    async createKey() {
+      const btn = $("pl_create"); btn.disabled = true;
+      try {
+        const res = await Credits.gatedPost("/customer/key", null, true); const d = await res.json();
+        if (!res.ok) throw new Error((d.error && d.error.message) || "Could not create key.");
+        Play.setKey(d.key);
+        $("pl_keyout").innerHTML = '<div class="msg ok">Your API key — copy it now, it won\'t be shown again:<br><code class="addr" style="display:inline-block;margin-top:.4rem">' + d.key + '</code></div>';
+        Play.loadKeysAndBalance();
+      } catch (e) { show($("pl_keyout"), "err", (e && e.message) || String(e)); }
+      finally { btn.disabled = false; }
+    },
+    usePasted() {
+      const k = ($("pl_paste").value || "").trim();
+      if (!k) return;
+      Play.setKey(k); $("pl_paste").value = "";
+      show($("pl_keyout"), "ok", "Key set for this tab — the chat and samples below now use it.");
+    },
+    addBubble(cls, text) {
+      const log = $("pl_chat"); const empty = log.querySelector(".empty"); if (empty) empty.remove();
+      const el = document.createElement("div"); el.className = "bubble " + cls; el.textContent = text;
+      log.appendChild(el); log.scrollTop = log.scrollHeight; return el;
+    },
+    async send() {
+      if (Play.streaming) return;
+      const text = ($("pl_input").value || "").trim();
+      const model = $("pl_model").value;
+      if (!text) return;
+      if (!Play.key) return show($("pl_chatout"), "err", "Create or paste an API key first.");
+      if (!model) return show($("pl_chatout"), "err", "No model is online right now.");
+      $("pl_chatout").innerHTML = "";
+      Play.addBubble("user", text); $("pl_input").value = "";
+      Play.messages.push({ role: "user", content: text });
+      const bot = Play.addBubble("bot", "…");
+      Play.streaming = true; $("pl_send").disabled = true;
+      try {
+        const res = await fetch("/v1/chat/completions", {
+          method: "POST",
+          headers: { "content-type": "application/json", "authorization": "Bearer " + Play.key },
+          body: JSON.stringify({ model, messages: Play.messages, stream: true }),
+        });
+        if (!res.ok || !res.body) {
+          let msg = "Request failed (" + res.status + ").";
+          try { const e = await res.json(); msg = (e.error && e.error.message) || msg; } catch {}
+          bot.remove(); throw new Error(msg);
+        }
+        const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "", acc = "";
+        for (;;) {
+          const { done, value } = await reader.read(); if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let nl;
+          while ((nl = buf.indexOf("\n")) >= 0) {
+            const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+            if (!line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+            try { const j = JSON.parse(payload); const c = j.choices && j.choices[0]; const delta = c && c.delta && c.delta.content; if (delta) { acc += delta; bot.textContent = acc; $("pl_chat").scrollTop = $("pl_chat").scrollHeight; } } catch {}
+          }
+        }
+        bot.textContent = acc || "(no content returned)";
+        if (acc) Play.messages.push({ role: "assistant", content: acc });
+        Play.loadKeysAndBalance(); // refresh balance after the spend
+      } catch (e) { show($("pl_chatout"), "err", (e && e.message) || String(e)); }
+      finally { Play.streaming = false; Play.renderKeyState(); }
+    },
+    renderSamples() {
+      const base = Play.baseUrl();
+      const key = Play.key || "YOUR_API_KEY";
+      const model = ($("pl_model") && $("pl_model").value) || (Play.models[0] && Play.models[0].id) || "gemma3:12b-it-qat";
+      const s = {
+        curl: `curl ${base}/chat/completions \\\n  -H "Authorization: Bearer ${key}" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n    "model": "${model}",\n    "messages": [{"role": "user", "content": "Hello!"}]\n  }'`,
+        python: `from openai import OpenAI\n\nclient = OpenAI(\n    base_url="${base}",\n    api_key="${key}",\n)\n\nresp = client.chat.completions.create(\n    model="${model}",\n    messages=[{"role": "user", "content": "Hello!"}],\n)\nprint(resp.choices[0].message.content)`,
+        js: `import OpenAI from "openai";\n\nconst client = new OpenAI({\n  baseURL: "${base}",\n  apiKey: "${key}",\n});\n\nconst resp = await client.chat.completions.create({\n  model: "${model}",\n  messages: [{ role: "user", content: "Hello!" }],\n});\nconsole.log(resp.choices[0].message.content);`,
+      };
+      $("pl_code").textContent = s[Play.lang] || s.curl;
+    },
+    clear() {
+      if (Play.streaming) return; // let the in-flight reply finish first
+      Play.messages = [];
+      $("pl_chat").innerHTML = '<div class="empty">Pick a model and say hello 👋</div>';
+      $("pl_chatout").innerHTML = "";
+    },
+    reset() { $("plBody").classList.add("hidden"); $("plGate").classList.remove("hidden"); },
+  };
+  $("pl_create").addEventListener("click", () => Play.createKey());
+  $("pl_clear").addEventListener("click", () => Play.clear());
+  $("pl_use").addEventListener("click", () => Play.usePasted());
+  $("pl_send").addEventListener("click", () => Play.send());
+  $("pl_input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); Play.send(); } });
+  $("pl_model").addEventListener("change", () => Play.renderSamples());
+  $("pl_langtabs").addEventListener("click", (e) => { const b = e.target.closest("button[data-lang]"); if (!b) return; Play.lang = b.dataset.lang; [...$("pl_langtabs").children].forEach((x) => x.classList.toggle("active", x === b)); Play.renderSamples(); });
+  $("pl_copy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("pl_code").textContent); $("pl_copy").textContent = "Copied"; setTimeout(() => { $("pl_copy").textContent = "Copy"; }, 1200); } catch {} });
+
+  // ===================================================================== RUN A NODE
+  const Run = {
+    async enroll() {
+      const btn = $("run_enroll"); btn.disabled = true; show($("run_out"), "info", "Approve the signature in your account…");
+      try {
+        const ch = await (await fetch("/provider/challenge?for=enroll")).json();
+        const { address: addr, signature } = await W.signMessageBase64(ch.message);
+        const res = await fetch("/provider/enroll", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey: addr, nonce: ch.nonce, signature }) });
+        const d = await res.json();
+        if (!res.ok) throw new Error((d.error && d.error.message) || "Enrollment failed.");
+        $("run_cmd").textContent = `curl -fsSL ${location.origin}/install | DISPATCHER=${location.origin} KORETEX_TOKEN=${d.token} KORETEX_WALLET=${d.address} bash`;
+        $("run_who").textContent = d.address; $("run_out").innerHTML = "";
+        btn.textContent = "Command generated ✓"; btn.disabled = true;
+        $("run_cmdbox").classList.remove("hidden");
+      } catch (e) { show($("run_out"), "err", (e && e.message) || String(e)); btn.disabled = false; }
+    },
+    onWallet(addr) {
+      const btn = $("run_enroll");
+      if (addr) { btn.disabled = false; btn.textContent = "Generate install command"; }
+      else { btn.disabled = true; btn.textContent = "Log in first"; $("run_cmdbox").classList.add("hidden"); Run._attempted = false; }
+    },
+    // Auto-generate the command the moment a logged-in user lands on this tab, so the button isn't
+    // needed — they just approve the wallet signature. Tried once per session; the button stays as a
+    // manual retry/regenerate fallback (and covers any case where the signature needs a click).
+    _attempted: false,
+    maybeAuto() {
+      if (!address || Run._attempted) return;
+      if (!$("run_cmdbox").classList.contains("hidden")) return; // already generated this session
+      Run._attempted = true;
+      Run.enroll();
+    },
+  };
+  $("run_enroll").addEventListener("click", () => Run.enroll());
+  $("run_copy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("run_cmd").textContent); $("run_copy").textContent = "Copied"; } catch {} });
+
+  // ===================================================================== POINTS ESTIMATOR
+  const Calc = {
+    params: null, models: [],
+    GEN: { M1: 1.0, M2: 1.25, M3: 1.5, M4: 1.9 },
+    TIER: { base: 1.0, Pro: 1.35, Max: 1.9, Ultra: 2.7 },
+    // Rough llama.cpp tok/s on an M1 base, by model size — an estimation aid, not part of scoring.
+    baseTps(sizeGb) { const g = Number(sizeGb) || 9; return g <= 3 ? 42 : g <= 6 ? 24 : g <= 10 ? 15 : g <= 14 ? 12 : g <= 24 ? 7 : 3.4; },
+    async init() {
+      try {
+        const [p, cat] = await Promise.all([
+          fetch("/points/params").then((r) => r.json()),
+          fetch("/models/catalog").then((r) => r.json()).catch(() => ({ models: [] })),
+        ]);
+        Calc.params = p;
+        Calc.models = cat.models || [];
+        $("calc_model").innerHTML = Calc.models.length
+          ? Calc.models.map((m) => `<option value="${m.tag}" data-size="${m.sizeGb}" data-ram="${m.minRamGb}" data-weight="${m.pointsWeight ?? 1}">${m.name} (~${m.sizeGb}GB · ×${(m.pointsWeight ?? 1).toFixed(2)} pts)</option>`).join("")
+          : `<option data-size="9" data-ram="16" data-weight="1">a model (~9GB)</option>`;
+        // Fill the live formula constants into the "How each part is calculated" copy.
+        $("p_div").textContent = Math.round(p.diversityBonus * 100);
+        $("p_authfloor").textContent = Math.round(p.authFailFloor * 100);
+        $("p_trustfloor").textContent = $("p_trustfloor2").textContent = Math.round(p.trustFloor * 100);
+        $("p_trustdays").textContent = p.trustRampDays;
+        ["calc_chip", "calc_tier", "calc_ram", "calc_model", "calc_hours", "calc_demand", "calc_days"].forEach((id) => $(id).addEventListener("input", Calc.compute));
+        Calc.compute();
+      } catch (e) { /* leave the placeholder if params/catalog can't load */ }
+    },
+    compute() {
+      const p = Calc.params; if (!p) return;
+      const hours = Number($("calc_hours").value); $("calc_hours_v").textContent = hours;
+      const days = Number($("calc_days").value); $("calc_days_v").textContent = days;
+      const demand = Number($("calc_demand").value);
+      const opt = $("calc_model").selectedOptions[0];
+      const sizeGb = opt ? Number(opt.dataset.size) : 9;
+      const minRam = opt ? Number(opt.dataset.ram) : 16;
+      const weight = opt ? Number(opt.dataset.weight) || 1 : 1; // v2 model-size points multiplier
+      const ram = Number($("calc_ram").value);
+      const chipF = (Calc.GEN[$("calc_chip").value] || 1) * (Calc.TIER[$("calc_tier").value] || 1);
+      const tps = Math.max(1, Math.round(Calc.baseTps(sizeGb) * chipF));
+      if (ram < minRam) {
+        $("calc_points").textContent = "—"; $("calc_break").innerHTML = "";
+        $("calc_warn").innerHTML = `<div class="msg err">This model needs ≥ ${minRam}GB unified memory — pick a smaller model or more RAM.</div>`;
+        return;
+      }
+      $("calc_warn").innerHTML = "";
+      const units = tps * hours * 3600 * demand;          // tokens served in a 1-day epoch
+      const uptime = hours / 24;                           // fraction of the day up = uptime credits/day
+      const hardware = p.hardwareWeight * Math.sqrt(tps);
+      const modelValue = Math.sqrt(units * weight);        // v2: demand weighted by model size; one honest model → diversity=1, authGate=1
+      const trust = Math.min(1, Math.max(p.trustFloor, p.trustFloor + (1 - p.trustFloor) * (days / p.trustRampDays)));
+      // v1: points ACCRUE with uptime — per full day, uptime credits × (base rate + hardware) + demand.
+      const pts = trust * (uptime * ((p.uptimeRate || 0) + hardware) + modelValue);
+      $("calc_points").textContent = Math.round(pts).toLocaleString();
+      $("calc_break").innerHTML = [
+        ["Est. throughput", tps + " tok/s"],
+        ["Uptime", Math.round(uptime * 100) + "%"],
+        ["Uptime credits / day", uptime.toFixed(2)],
+        ["Hardware term", hardware.toFixed(1)],
+        ["Model weight", "×" + weight.toFixed(2)],
+        ["Model value", modelValue.toFixed(0)],
+        ["Trust ramp", Math.round(trust * 100) + "%"],
+        ["Tokens / day", Math.round(units).toLocaleString()],
+      ].map(([k, v]) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+    },
+  };
+
+  // ---------------------------------------------------------------- lazy tab init
+  const TAB_INIT = {
+    models: () => Models.load(),
+    demand: () => Demand.load(),
+    leaderboard: () => Leaderboard.init(),
+    points: () => Calc.init(),
+  };
+
+  // React to wallet changes across all wallet-aware tabs.
+  onWallet((addr) => {
+    Run.onWallet(addr);
+    if (addr) {
+      // First login on this browser → drop them on "Run a node" and auto-generate the command
+      // (they just approve the wallet signature). Returning users keep whatever tab they were on.
+      let firstTime = false;
+      try { firstTime = !localStorage.getItem("kx_onboarded"); } catch {}
+      if (firstTime) { try { localStorage.setItem("kx_onboarded", "1"); } catch {} selectTab("run", true); }
+      if (currentTab === "run") Run.maybeAuto();
+      if (currentTab === "dashboard") Dash.load();
+      if (currentTab === "credits") Credits.open();
+      if (currentTab === "playground") Play.open();
+    } else { Dash.reset(); Credits.reset(); Play.reset(); }
+  });
+  // When switching INTO a wallet tab while already connected, load it.
+  const origSelect = selectTab;
+  tabBtns.forEach((b) => b.addEventListener("click", () => {
+    if (address) { if (b.dataset.tab === "dashboard" && $("dashBody").classList.contains("hidden")) Dash.load(); if (b.dataset.tab === "credits" && $("crBody").classList.contains("hidden")) Credits.open(); if (b.dataset.tab === "run") Run.maybeAuto(); }
+  }));
+
+  // Info tooltips: hover is CSS-only; this adds tap/click to toggle (touch devices), closing others.
+  document.addEventListener("click", (e) => {
+    const icon = e.target.closest ? e.target.closest(".info") : null;
+    document.querySelectorAll(".info.open").forEach((el) => { if (el !== icon) el.classList.remove("open"); });
+    if (icon) { e.preventDefault(); e.stopPropagation(); icon.classList.toggle("open"); }
+  });
+
+  // ---------------------------------------------------------------- boot
+  (async () => {
+    W.onDisconnect(() => setAddress(null));
+    // Restore the tab the user was on before a Google round-trip, else hash, else path.
+    let initial = location.hash.slice(1);
+    try { const rt = sessionStorage.getItem("kx_return_tab"); if (rt) { initial = rt; sessionStorage.removeItem("kx_return_tab"); } } catch {}
+    if (!initial) initial = PATH_TAB[location.pathname] || "dashboard";
+    selectTab(initial, true);
+    try { const addr = await W.init(); if (addr) setAddress(addr); } catch {}
+  })();
+</script>
+</body>
+</html>

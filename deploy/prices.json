@@ -1,0 +1,30 @@
+{
+  "_comment": "Inference price book. Values are CREDITS per 1,000,000 tokens (prompt+completion). At the 10000 credits/USDC peg, 4000 credits = $0.40 / 1M tokens. The ladder scales with model heaviness (params → unified-memory + slower tok/s on a Mac, so bigger models cost the provider more and bill the customer more); it's anchored on the 12B primary at 4000. Keep roughly in step with deploy/models.json and the points modelWeight curve. 'default' applies to any model not listed.",
+  "default": 4000,
+  "models": {
+    "qwen2.5:0.5b": 500,
+    "gemma:2b": 1000,
+    "llama3.2:3b": 1500,
+    "qwen3:4b": 1500,
+    "llama3.1:8b": 2500,
+    "qwen2.5-coder:7b": 2500,
+    "qwen3:8b": 2500,
+    "deepseek-r1:8b": 2500,
+    "gemma3:12b-it-qat": 4000,
+    "qwen3:14b": 4500,
+    "deepseek-r1:14b": 4500,
+    "gpt-oss:20b": 6000,
+    "devstral:24b": 6500,
+    "mistral-small3.2:24b": 6500,
+    "qwen3:30b-a3b": 7000,
+    "qwen3-coder:30b": 7500,
+    "qwen3:32b": 8000,
+    "qwen2.5-coder:32b": 8000,
+    "deepseek-r1:32b": 8000,
+    "hf.co/deepreinforce-ai/Ornith-1.0-9B-GGUF:Q4_K_M": 3000,
+    "hf.co/deepreinforce-ai/Ornith-1.0-35B-GGUF:Q4_K_M": 9000,
+    "llama3.3:70b": 14000,
+    "gpt-oss:120b": 18000,
+    "qwen3:235b-a22b": 30000
+  }
+}

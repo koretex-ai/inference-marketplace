@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Connect your account · Koretex</title>
+<link rel="icon" type="image/svg+xml" href="/koretex-favicon.svg" />
+<style>
+  :root{ --ink:#1D1D1F; --soft:#6E6E73; --line:#D9DCE3; --blue:#2E6BE6; --violet:#9B3FD4; --cta1:#3A7BF0; --cta2:#8B4BE6;
+         --sans:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue",Inter,system-ui,sans-serif; --mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  *{box-sizing:border-box}
+  body{ font-family:var(--sans); color:var(--ink); background:#FBFCFF; line-height:1.5; -webkit-font-smoothing:antialiased;
+        max-width:30rem; margin:0 auto; padding:4rem 1.25rem; min-height:100vh; }
+  #bgwash{position:fixed;inset:0;z-index:-1;background:linear-gradient(160deg,#EAF1FF 0%,#F1ECFF 55%,#FBEFF6 100%)}
+  .brand{font-weight:600;font-size:19px;letter-spacing:-.02em;display:inline-flex;align-items:center;gap:9px;margin-bottom:1.5rem}
+  .brand .logo{height:22px;width:22px;border-radius:6px;display:block}
+  .brand b{font-weight:inherit;color:inherit}
+  h1{ font-size:1.5rem;font-weight:700;letter-spacing:-.02em;margin-bottom:.25rem; }
+  .sub{ color:var(--soft); margin-top:0; }
+  .card{ background:rgba(255,255,255,.74); border:1px solid var(--line); border-radius:20px; padding:1.3rem 1.4rem; margin-top:1.5rem; backdrop-filter:blur(6px); }
+  button{ font-family:var(--sans); font-weight:600; font-size:15px; padding:.8rem 1.1rem; border:0; border-radius:980px;
+          background:linear-gradient(90deg,var(--cta1),var(--cta2)); color:#fff; cursor:pointer; width:100%; box-shadow:0 6px 20px rgba(110,90,230,.3); }
+  button.sec{ background:rgba(255,255,255,.6); color:var(--ink); border:1px solid var(--line); box-shadow:none; }
+  button:disabled{ opacity:.5; cursor:not-allowed; box-shadow:none; }
+  code{ background:rgba(58,123,240,.1); padding:.1rem .4rem; border-radius:6px; font-family:var(--mono); }
+  .msg{ margin-top:1rem; padding:.8rem 1rem; border-radius:12px; font-size:.92rem; white-space:pre-wrap; }
+  .ok{ background:rgba(31,181,122,.14); border:1px solid rgba(31,181,122,.3); }
+  .err{ background:rgba(210,59,59,.12); border:1px solid rgba(210,59,59,.28); }
+  .addr{ font-family:var(--mono); word-break:break-all; }
+</style>
+</head>
+<body>
+  <div id="bgwash"></div>
+  <div class="brand"><img class="logo" src="/koretex-favicon.svg" alt="Koretex" width="22" height="22" /><span>Kore<b>tex</b></span></div>
+  <h1>Link this Mac to your account</h1>
+  <p class="sub">Your account becomes this node's identity and the address that receives earnings.</p>
+
+  <div class="card">
+    <p style="margin-top:0">Pairing code: <code id="code">—</code></p>
+    <button id="google" disabled>Login with Google</button>
+    <button id="ext" disabled hidden style="display:none">Use browser extension</button>
+    <div id="out"></div>
+    <p style="font-size:.82rem;opacity:.65;margin-bottom:0">
+      You'll sign a message to prove ownership. This authorizes nothing — no payment,
+      no transfer. Your account's secret key never leaves your device.
+    </p>
+  </div>
+
+<script src="/wallet.js"></script>
+<script>
+  const params = new URLSearchParams(location.search);
+  const code = params.get("code") || "";
+  const out = document.getElementById("out");
+  const googleBtn = document.getElementById("google");
+  const extBtn = document.getElementById("ext");
+  const W = window.KoretexWallet;
+  document.getElementById("code").textContent = code || "(missing)";
+
+  const show = (cls, text) => { out.innerHTML = '<div class="msg ' + cls + '">' + text + '</div>'; };
+  const setBusy = (b) => { googleBtn.disabled = b; extBtn.disabled = b; };
+
+  // Sign the pairing message and confirm. Runs once a wallet is connected — directly after an
+  // extension connect, or automatically when we return from the Google redirect (the ?code is
+  // preserved across the round-trip, so we land back here ready to authorize).
+  async function authorize() {
+    setBusy(true); show("info", "Approve the signature in your account…");
+    try {
+      const mres = await fetch("/provider/pair/message?code=" + encodeURIComponent(code));
+      if (!mres.ok) throw new Error("This pairing code is unknown or expired. Re-run the installer.");
+      const { message } = await mres.json();
+
+      const { address, signature } = await W.signMessageBase64(message);
+
+      const cres = await fetch("/provider/pair/confirm", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pairingCode: code, pubkey: address, signature }),
+      });
+      const data = await cres.json();
+      if (!cres.ok || !data.ok) throw new Error(data.error || "Verification failed.");
+
+      show("ok", "✅ Account linked:\n<span class='addr'>" + data.address + "</span>\n\nReturn to your terminal — your node is finishing setup.");
+    } catch (e) {
+      show("err", (e && e.message) || String(e));
+      setBusy(false);
+    }
+  }
+
+  googleBtn.addEventListener("click", async () => {
+    setBusy(true); out.innerHTML = "";
+    try {
+      // Preserve ?code across the redirect so we return to this exact pairing flow.
+      await W.connectGoogle(location.pathname + location.search);
+    } catch (e) { show("err", (e && e.message) || String(e)); setBusy(false); }
+  });
+
+  extBtn.addEventListener("click", async () => {
+    setBusy(true); out.innerHTML = "";
+    try {
+      const address = await W.connectExtension();
+      if (!address) throw new Error("No account from the extension.");
+      await authorize();
+    } catch (e) { show("err", (e && e.message) || String(e)); setBusy(false); }
+  });
+
+  if (!code) {
+    show("err", "No pairing code in the link. Re-run the installer to get a fresh link.");
+  } else {
+    setBusy(false);
+    // If we just came back from Google (or a session is live), finish the pairing automatically.
+    (async () => {
+      try {
+        const address = await W.init();
+        if (address) await authorize();
+      } catch { /* not signed in yet — wait for a button */ }
+    })();
+  }
+</script>
+</body>
+</html>

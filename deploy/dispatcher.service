@@ -1,0 +1,22 @@
+# systemd unit for the dispatcher (control + data plane). Installed by deploy-dispatcher.sh.
+[Unit]
+Description=Mac Inference Marketplace Dispatcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=macinf
+Group=macinf
+WorkingDirectory=/opt/macinference
+EnvironmentFile=/etc/macinference/dispatcher.env
+ExecStart=/usr/bin/node /opt/macinference/node_modules/tsx/dist/cli.mjs /opt/macinference/src/dispatcher/index.ts
+Restart=always
+RestartSec=3
+# hardening
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

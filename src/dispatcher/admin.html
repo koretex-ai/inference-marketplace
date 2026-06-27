@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Operator console · Koretex</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         max-width: 56rem; margin: 2.5rem auto; padding: 0 1.25rem; line-height: 1.5; }
+  h1 { font-size: 1.5rem; margin-bottom: .25rem; }
+  .sub { opacity: .7; margin-top: 0; }
+  button { font: inherit; font-weight: 600; padding: .7rem 1.1rem; border: 0; border-radius: 10px;
+           background: #6d3bf5; color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: .8rem; margin: 1.4rem 0; }
+  .card { border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: 12px; padding: 1rem 1.1rem; }
+  .card .n { font-size: 1.6rem; font-weight: 700; }
+  .card .l { opacity: .65; font-size: .85rem; }
+  h2 { font-size: 1rem; margin: 1.6rem 0 .3rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  th, td { text-align: left; padding: .4rem .55rem; border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent); }
+  th { opacity: .6; font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: .8rem; }
+  .msg { margin-top: 1rem; padding: .8rem 1rem; border-radius: 10px; font-size: .92rem; }
+  .err { background: color-mix(in srgb, #d23b3b 18%, transparent); }
+  #panel { display: none; }
+</style>
+</head>
+<body>
+  <h1>Operator console</h1>
+  <p class="sub">Network-wide ledger. Visible only to the operator account (set via <span class="mono">ADMIN_WALLET</span>).</p>
+
+  <button id="google">Continue with Google</button>
+  <button id="ext" style="background:#333;margin-left:.5rem">Use browser extension</button>
+  <div id="out"></div>
+
+  <div id="panel">
+    <div class="cards">
+      <div class="card"><div class="n" id="jobs">—</div><div class="l">total jobs</div></div>
+      <div class="card"><div class="n" id="providers">—</div><div class="l">providers paid</div></div>
+    </div>
+    <h2>Model pricing <span class="l" style="font-weight:400">— demand, provider-requested prices, and live price control (credits / 1M tokens)</span></h2>
+    <table id="pricing"><thead><tr><th>Model</th><th class="num">Demand (7d)</th><th class="num">Nodes</th><th class="num">Current</th><th class="num">Requested</th><th class="num">Set price (credits/1M)</th><th></th></tr></thead><tbody></tbody></table>
+
+    <h2>Live fleet <span class="l" id="fleetcount" style="font-weight:400"></span></h2>
+    <table id="fleet"><thead><tr><th>Node</th><th>Provider</th><th>Chip</th><th class="num">RAM</th><th class="num">Cores</th><th>macOS</th><th>Serving</th><th class="num">In-flight</th><th></th></tr></thead><tbody></tbody></table>
+    <h2>All nodes <span class="l" style="font-weight:400">— points ledger (scrub ghosts / duplicates here)</span></h2>
+    <table id="inv"><thead><tr><th>Node</th><th>Provider</th><th>Status</th><th class="num">Idle</th><th class="num">Points</th><th></th></tr></thead><tbody></tbody></table>
+    <h2>By provider account</h2>
+    <table id="byowner"><thead><tr><th>Account</th><th class="num">Tokens</th></tr></thead><tbody></tbody></table>
+    <h2>By customer</h2>
+    <table id="bycustomer"><thead><tr><th>Customer key</th><th class="num">Tokens</th></tr></thead><tbody></tbody></table>
+    <h2>Recent jobs</h2>
+    <table id="recent"><thead><tr><th>When</th><th>Model</th><th class="num">Tokens</th><th>Provider</th><th>Customer</th></tr></thead><tbody></tbody></table>
+  </div>
+
+<script src="/wallet.js"></script>
+<script>
+  const googleBtn = document.getElementById("google"), extBtn = document.getElementById("ext");
+  const out = document.getElementById("out"), panel = document.getElementById("panel");
+  const W = window.KoretexWallet;
+  const err = (t) => { out.innerHTML = '<div class="msg err">' + t + '</div>'; };
+  const fmt = (n) => n.toLocaleString();
+  const short = (s) => s ? s.slice(0, 6) + "…" + s.slice(-4) : "—";
+  const rows = (obj) => Object.entries(obj).sort((a, b) => b[1] - a[1]);
+
+  // Connected: the connect buttons collapse to a single "Load console" / "Refresh" action that
+  // signs the admin challenge on demand (the backend only lets ADMIN_WALLET through).
+  function showConnected() {
+    extBtn.style.display = "none";
+    googleBtn.textContent = "Load console";
+    googleBtn.disabled = false;
+    googleBtn.onclick = loadData;
+  }
+
+  async function loadData() {
+    googleBtn.disabled = true; out.innerHTML = "";
+    try {
+      const ch = await (await fetch("/provider/challenge?for=admin")).json();
+      const { address, signature } = await W.signMessageBase64(ch.message);
+      const res = await fetch("/admin/data", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pubkey: address, nonce: ch.nonce, signature }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data.error && data.error.message) || "Access denied.");
+      render(data);
+    } catch (e) { err((e && e.message) || String(e)); googleBtn.disabled = false; }
+  }
+
+  function render(d) {
+    googleBtn.textContent = "Refresh"; googleBtn.disabled = false;
+    document.getElementById("jobs").textContent = fmt(d.summary.jobs);
+    document.getElementById("providers").textContent = fmt(Object.keys(d.summary.byOwner).length);
+
+    const f = d.fleet || [];
+    document.getElementById("fleetcount").textContent = f.length ? `— ${f.length} node${f.length === 1 ? "" : "s"} online` : "";
+    document.querySelector("#fleet tbody").innerHTML = f.length
+      ? f.map((n) => {
+          const hw = n.hw || {};
+          const models = (n.models && n.models.length) ? n.models.join(", ") : "—";
+          return `<tr><td class="mono">${short(n.nodeId)}</td><td class="mono">${short(n.owner)}</td><td>${hw.chip || "—"}</td><td class="num">${hw.ramGb ? hw.ramGb + " GB" : "—"}</td><td class="num">${hw.cpuCores || "—"}</td><td>${hw.macosVersion || "—"}</td><td>${models}</td><td class="num">${n.inflight}</td>`
+            + `<td><button class="rv" data-node="${encodeURIComponent(n.nodeId)}" style="background:#d23b3b;padding:.32rem .7rem;font-size:.8rem">Revoke</button></td></tr>`;
+        }).join("")
+      : `<tr><td colspan="9" style="opacity:.6">no nodes online right now</td></tr>`;
+    document.querySelectorAll("#fleet .rv").forEach((b) => b.addEventListener("click", () => revokeNode(decodeURIComponent(b.dataset.node), b)));
+
+    const inv = d.inventory || [];
+    document.querySelector("#inv tbody").innerHTML = inv.length
+      ? inv.map((n) => {
+          const status = n.live
+            ? '<span style="color:#1FB57A">● live</span>'
+            : (n.idleDays >= 2 ? '<span style="opacity:.55">stale</span>' : "idle");
+          const idle = n.live ? "—" : (n.idleDays <= 0 ? "today" : n.idleDays + "d");
+          return `<tr><td class="mono">${n.nodeId}</td><td class="mono">${short(n.owner)}</td><td>${status}</td><td class="num">${idle}</td><td class="num">${fmt(Math.round(n.points))}</td>`
+            + `<td><button class="rm" data-node="${encodeURIComponent(n.nodeId)}" style="background:#d23b3b;padding:.32rem .7rem;font-size:.8rem">Remove</button></td></tr>`;
+        }).join("")
+      : `<tr><td colspan="6" style="opacity:.6">no nodes in the ledger</td></tr>`;
+    document.querySelectorAll("#inv .rm").forEach((b) => b.addEventListener("click", () => removeNode(decodeURIComponent(b.dataset.node), b)));
+
+    document.querySelector("#byowner tbody").innerHTML =
+      rows(d.summary.byOwner).map(([k, v]) => `<tr><td class="mono">${k}</td><td class="num">${fmt(v)}</td></tr>`).join("") || `<tr><td colspan="2" style="opacity:.6">none yet</td></tr>`;
+    document.querySelector("#bycustomer tbody").innerHTML =
+      rows(d.summary.byCustomer).map(([k, v]) => `<tr><td class="mono">${k}</td><td class="num">${fmt(v)}</td></tr>`).join("") || `<tr><td colspan="2" style="opacity:.6">none yet</td></tr>`;
+    document.querySelector("#recent tbody").innerHTML =
+      d.recent.map((r) => `<tr><td>${new Date(r.at).toLocaleString()}</td><td>${r.model || "—"}</td><td class="num">${fmt(r.completionTokens)}</td><td class="mono">${short(r.owner)}</td><td class="mono">${short(r.customerKey)}</td></tr>`).join("") || `<tr><td colspan="5" style="opacity:.6">no jobs yet</td></tr>`;
+    panel.style.display = "block";
+    loadPricing();
+  }
+
+  // Model pricing table. Reads the public /models/demand feed (demand + supply + current/requested
+  // prices), then lets the operator set or clear a per-model price. Each set/clear signs a fresh
+  // admin challenge (only ADMIN_WALLET is accepted server-side) and updates the row in place.
+  let CREDITS_PER_USDC = 10000;
+  async function loadPricing() {
+    try {
+      const d = await (await fetch("/models/demand?days=7")).json();
+      CREDITS_PER_USDC = d.creditsPerUsdc || 10000;
+      const usd = (c) => "$" + (c / CREDITS_PER_USDC).toFixed(2);
+      const tb = document.querySelector("#pricing tbody");
+      const ms = d.models || [];
+      tb.innerHTML = ms.length ? ms.map((m) => {
+        const cur = `${fmt(m.creditsPerMTok)} <span style="opacity:.55">${usd(m.creditsPerMTok)}</span>` + (m.priced ? "" : ' <span style="opacity:.55">(default)</span>');
+        const req = (m.proposedCreditsAvg != null) ? `${fmt(m.proposedCreditsAvg)} <span style="opacity:.55">${usd(m.proposedCreditsAvg)} · ${m.proposals}</span>` : '<span style="opacity:.4">—</span>';
+        const id = encodeURIComponent(m.model);
+        return `<tr data-model="${id}">`
+          + `<td class="mono">${m.model}${m.curated ? "" : ' <span style="opacity:.5">community</span>'}</td>`
+          + `<td class="num">${fmt(m.completionTokens)}</td>`
+          + `<td class="num">${m.nodes}</td>`
+          + `<td class="num">${cur}</td>`
+          + `<td class="num">${req}</td>`
+          + `<td class="num"><input class="pp" type="number" min="1" step="100" placeholder="${m.proposedCreditsAvg ?? m.creditsPerMTok}" style="width:96px;text-align:right"></td>`
+          + `<td><button class="setp" style="padding:.32rem .7rem;font-size:.8rem">Set</button> <button class="clrp" style="background:#777;padding:.32rem .6rem;font-size:.8rem">Clear</button></td>`
+          + `</tr>`;
+      }).join("") : `<tr><td colspan="7" style="opacity:.6">no models with demand or supply yet</td></tr>`;
+      tb.querySelectorAll(".setp").forEach((b) => b.addEventListener("click", () => {
+        const tr = b.closest("tr"); const model = decodeURIComponent(tr.dataset.model);
+        const v = Math.round(Number(tr.querySelector(".pp").value));
+        if (!(v > 0)) { err("Enter a positive credits/1M value."); return; }
+        setPrice(model, v, b);
+      }));
+      tb.querySelectorAll(".clrp").forEach((b) => b.addEventListener("click", () => {
+        const tr = b.closest("tr"); setPrice(decodeURIComponent(tr.dataset.model), null, b);
+      }));
+    } catch (e) { /* pricing is best-effort; leave the rest of the console usable */ }
+  }
+
+  // Set (credits>0) or clear (credits=null) a model's price. Signs a fresh admin challenge each time.
+  async function setPrice(model, creditsPerMTok, btn) {
+    btn.disabled = true; const label = btn.textContent; btn.textContent = "…"; out.innerHTML = "";
+    try {
+      const ch = await (await fetch("/provider/challenge?for=admin")).json();
+      const { address, signature } = await W.signMessageBase64(ch.message);
+      const res = await fetch("/admin/price", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pubkey: address, nonce: ch.nonce, signature, model, creditsPerMTok }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data.error && data.error.message) || "Failed.");
+      loadPricing();
+    } catch (e) { err((e && e.message) || String(e)); btn.disabled = false; btn.textContent = label; }
+  }
+
+  // Scrub a node from the points ledger. Signs a fresh admin challenge, deletes it server-side,
+  // then drops the row in place (no full reload, so scrubbing several doesn't re-prompt each time).
+  async function removeNode(nodeId, btn) {
+    if (!confirm("Permanently remove\n\n" + nodeId + "\n\nfrom the points ledger? This deletes its score history and can't be undone.")) return;
+    btn.disabled = true; btn.textContent = "…"; out.innerHTML = "";
+    try {
+      const ch = await (await fetch("/provider/challenge?for=admin")).json();
+      const { address, signature } = await W.signMessageBase64(ch.message);
+      const res = await fetch("/admin/remove-node", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pubkey: address, nonce: ch.nonce, signature, nodeId }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error((data.error && data.error.message) || "Remove failed.");
+      const row = btn.closest("tr"); if (row) row.remove();
+      out.innerHTML = '<div class="msg" style="background:color-mix(in srgb,#1FB57A 20%,transparent)">Removed ' + nodeId + ' (' + data.removed + ' row' + (data.removed === 1 ? "" : "s") + ').</div>';
+    } catch (e) { err((e && e.message) || String(e)); btn.disabled = false; btn.textContent = "Remove"; }
+  }
+
+  // Revoke a live node: kill its token + drop the socket (it can't reconnect until re-installed).
+  // Keeps its points history (unlike Remove). Signs a fresh admin challenge each time.
+  async function revokeNode(nodeId, btn) {
+    if (!confirm("Revoke\n\n" + nodeId + "\n\nThis kills its token and disconnects it — the owner must re-install on that Mac to come back.")) return;
+    btn.disabled = true; btn.textContent = "…"; out.innerHTML = "";
+    try {
+      const ch = await (await fetch("/provider/challenge?for=admin")).json();
+      const { address, signature } = await W.signMessageBase64(ch.message);
+      const res = await fetch("/admin/revoke-node", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pubkey: address, nonce: ch.nonce, signature, nodeId }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error((data.error && data.error.message) || "Revoke failed.");
+      const row = btn.closest("tr"); if (row) row.remove();
+      out.innerHTML = '<div class="msg" style="background:color-mix(in srgb,#1FB57A 20%,transparent)">Revoked ' + nodeId + '.</div>';
+    } catch (e) { err((e && e.message) || String(e)); btn.disabled = false; btn.textContent = "Revoke"; }
+  }
+
+  async function connectGoogle() {
+    googleBtn.disabled = true; out.innerHTML = "";
+    try { await W.connectGoogle("/admin"); } // navigates away to Google, returns here
+    catch (e) { err((e && e.message) || String(e)); googleBtn.disabled = false; }
+  }
+
+  extBtn.addEventListener("click", async () => {
+    extBtn.disabled = true; googleBtn.disabled = true; out.innerHTML = "";
+    try {
+      const address = await W.connectExtension();
+      if (!address) throw new Error("No account from the extension.");
+      showConnected();
+    } catch (e) { err((e && e.message) || String(e)); extBtn.disabled = false; googleBtn.disabled = false; }
+  });
+
+  googleBtn.onclick = connectGoogle; // swapped to loadData once connected
+
+  // On load: resume an existing session, or finish a Google round-trip if we just came back.
+  (async () => {
+    try {
+      const address = await W.init();
+      if (address) showConnected();
+    } catch { /* not signed in yet — wait for a button */ }
+  })();
+</script>
+</body>
+</html>
