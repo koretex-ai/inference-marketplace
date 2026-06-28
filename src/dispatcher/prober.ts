@@ -12,7 +12,7 @@
 
 import { newEvent, type PointsStore } from "../shared/points.js";
 import { FingerprintRegistry } from "../shared/fingerprint.js";
-import type { InternalJobResult } from "./index.js";
+import { isVisionModel, type InternalJobResult } from "./index.js";
 
 /** Deterministic, open-ended prompts. Open-ended (not "what's 2+2") so different models/quants
  *  diverge — that divergence is what makes the output a usable fingerprint. */
@@ -108,7 +108,15 @@ export class Prober {
 
   /** Challenge one node on one of its models with a given prompt and record the `challenge` event. */
   async probe(target: ProbeTarget, prompt = CHALLENGE_PROMPTS[0]): Promise<ProbeOutcome> {
-    const model = target.models[Math.abs(this.cursor) % Math.max(1, target.models.length)] ?? "";
+    // The probe measures tok/s with a text prompt, so it must only ever challenge text/code models —
+    // a vision model benchmarked this way would feed a meaningless tok/s into the hardware signal.
+    // Challenge only the node's non-vision models; if a node serves nothing but VLMs there's nothing
+    // to probe here, so skip without recording (a real vision probe can come later).
+    const probeable = target.models.filter((m) => !isVisionModel(m));
+    if (probeable.length === 0) {
+      return { target, model: "", promptId: prompt.id, result: { ok: false, status: 0, body: "", latencyMs: 0, error: "no non-vision model to probe" } };
+    }
+    const model = probeable[Math.abs(this.cursor) % probeable.length] ?? "";
     const body = {
       model,
       messages: [{ role: "user", content: prompt.text }],

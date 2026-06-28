@@ -57,8 +57,10 @@ const NODE_TOKEN = process.env.NODE_TOKEN ?? "";
 const AUTH_RECHECK_MS = 60_000;
 // Throughput-measurement guards. A probe must generate at least this many tokens for tok/s to be
 // meaningful (a near-empty reply can't be timed), and tok/s is capped at a physically-plausible
-// ceiling — vision/odd models (e.g. moondream) batch-return their tokens so firstByte→done collapses
-// and tok/s explodes to absurd values that would inflate the hardware score.
+// ceiling as a backstop against an odd model whose firstByte→done collapses. VISION models are no
+// longer reined in by this ceiling — they're excluded from the tok/s metric outright (their
+// tokensPerSec is left undefined; see isVisionModel and the prober skip), because image prefill and
+// batch-returned tokens make any measured rate meaningless rather than merely high.
 const MIN_TPS_TOKENS = 8;
 const MAX_PLAUSIBLE_TPS = 500;
 // Bearer for the raw /admin/ledger* JSON endpoints (scripts/cron). Closed-by-default if unset.
@@ -369,14 +371,29 @@ const MODELS: CatalogModel[] = (() => {
   }
 })();
 
-// Vision / embedding models are excluded from what a node may SERVE — they go through other
-// endpoints/engines and can't be measured as text throughput (e.g. moondream batch-returns its
-// tokens, spiking tok/s). Drop them from a node's reported models: by catalog type, or by name for
-// ones a node has installed locally that aren't in the catalog.
-const NON_SERVABLE_TAGS = new Set(MODELS.filter((m) => m.type === "vision" || m.type === "embedding" || m.type === "embed").map((m) => m.tag));
-const NON_SERVABLE_RE = /moondream|llava|bakllava|minicpm-?v|cogvlm|vision|embed|nomic|mxbai|bge[-_]|arctic-embed/i;
+// Embedding models are excluded from what a node may SERVE — they use a different endpoint
+// (/v1/embeddings) and unit (vectors, not streamed tokens) and can't be metered as text
+// throughput. Drop them from a node's reported models: by catalog type, or by name for ones a node
+// has installed locally that aren't in the catalog. VISION (VLM) models ARE servable — they stream
+// text over /v1/chat/completions like any chat model — but they're kept out of the tok/s hardware
+// metric instead (see isVisionModel + the prober skip), since image prefill / batch-returned
+// tokens distort tok/s. (Blocklist approach: relax the filter to embeddings-only. If a future
+// off-catalog VLM slips the VISION_RE net it just isn't metric-excluded, not mis-served.)
+const NON_SERVABLE_TAGS = new Set(MODELS.filter((m) => m.type === "embedding" || m.type === "embed").map((m) => m.tag));
+const NON_SERVABLE_RE = /embed|nomic|mxbai|bge[-_]|arctic-embed/i;
 function servableModels(models: string[]): string[] {
   return models.filter((m) => !NON_SERVABLE_TAGS.has(m) && !NON_SERVABLE_RE.test(m));
+}
+
+// A vision-language model (image input → streamed text). Servable like any chat model, but its
+// throughput must NOT feed the tok/s hardware metric: image prefill is heavy and some VLMs batch-
+// return tokens, both of which corrupt the measured tokens/sec. Matched by catalog type or by a
+// name pattern for off-catalog tags a node may have pulled itself. Embeddings/image-gen are a
+// separate concern (filtered out of serving above) and are not vision.
+const VISION_RE = /holo1|qwen2\.?5?-?vl|qwen3-?vl|ui-?tars|llava|minicpm-?v|cogvlm|moondream|vision/i;
+export function isVisionModel(tag: string): boolean {
+  const t = tag.toLowerCase();
+  return MODELS.some((m) => m.tag.toLowerCase() === t && m.type === "vision") || VISION_RE.test(t);
 }
 
 // Inference price book (credits per 1M tokens, per model + default). Powers metered billing.
@@ -625,9 +642,12 @@ wss.on("connection", (ws) => {
           const completionTokens = usage.completionTokens ?? parseCompletionTokens(ctx.body);
           const genMs = Math.max(1, now - (ctx.firstByteAt ?? ctx.startedAt));
           // Only trust tok/s on a response long enough to time, and cap it so a batch-returned reply
-          // (genMs≈0) can't report an impossible rate.
+          // (genMs≈0) can't report an impossible rate. Vision jobs are excluded outright: their
+          // throughput must never reach the hardware metric, so leave tokensPerSec undefined and
+          // points.ts skips it (the `ev.tokensPerSec != null` guard in eventDeltas, shared by both
+          // stores).
           const tokensPerSec =
-            completionTokens != null && completionTokens >= MIN_TPS_TOKENS
+            !isVisionModel(job.model) && completionTokens != null && completionTokens >= MIN_TPS_TOKENS
               ? Math.min(MAX_PLAUSIBLE_TPS, (completionTokens * 1000) / genMs)
               : undefined;
           settleInternal(msg.jobId, job, {
