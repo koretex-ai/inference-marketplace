@@ -1,7 +1,7 @@
 // `koretex models` — let a provider add or remove models to serve, AFTER the first install.
 //
-//   koretex models            interactive picker: shows what fits this Mac, pull the ones you want
-//   koretex models ls         list installed models + what else this Mac can run
+//   koretex models            interactive picker: shows what fits this machine, pull the ones you want
+//   koretex models ls         list installed models + what else this machine can run
 //   koretex models add <tag…> pull one or more models — ANY Ollama tag or hf.co/* GGUF, not just
 //                             our catalog. After a pull we show what it earns and (if it isn't
 //                             priced yet) let you suggest a price for the operator.
@@ -29,22 +29,40 @@ interface CatalogRow {
   creditsPerMTok: number; // customer price you earn from
 }
 
-/** Total + free unified memory / disk for this Mac, to flag what fits. */
-function hardware(): { ramGb: number; freeGb: number } {
+/** Usable ACCELERATOR memory + free disk for this machine, to flag what fits. Mirrors the agent's
+ *  collectHardware(): Apple Silicon → unified memory · NVIDIA → total VRAM · CPU-only → capped RAM.
+ *  (Using system RAM on an NVIDIA box would wrongly offer models that don't fit in VRAM.) */
+function hardware(): { accelGb: number; freeGb: number; kind: string } {
   const ramGb = Math.round(os.totalmem() / 1024 ** 3) || 0;
+  // Free disk on $HOME, portable across macOS/Linux (POSIX `df -Pk` → 1024-blocks; col 4 = available).
   let freeGb = 0;
   try {
-    const out = execSync(`df -g "${os.homedir()}"`, { encoding: "utf8" }).trim().split("\n").pop() ?? "";
-    freeGb = Number(out.trim().split(/\s+/)[3]) || 0; // 4th column = available GB
+    const out = execSync(`df -Pk "${os.homedir()}"`, { encoding: "utf8" }).trim().split("\n").pop() ?? "";
+    freeGb = Math.floor((Number(out.trim().split(/\s+/)[3]) || 0) / 1048576);
   } catch {
     /* best-effort */
   }
-  return { ramGb, freeGb };
+  // NVIDIA VRAM via nvidia-smi (any OS), summed across cards.
+  let vramGb = 0;
+  try {
+    const out = execSync("nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits", {
+      encoding: "utf8",
+      timeout: 3000,
+    });
+    const mib = out.split("\n").map((l) => Number(l.trim())).filter((n) => Number.isFinite(n) && n > 0).reduce((a, b) => a + b, 0);
+    vramGb = Math.round(mib / 1024);
+  } catch {
+    /* no NVIDIA GPU / driver */
+  }
+  if (os.platform() === "darwin" && os.arch() === "arm64") return { accelGb: ramGb, freeGb, kind: "apple" };
+  if (vramGb > 0) return { accelGb: vramGb, freeGb, kind: "nvidia" };
+  return { accelGb: Math.round(ramGb * 0.7), freeGb, kind: "cpu" };
 }
 
-/** Does a model physically fit? Mirrors the dispatcher's filter (10GB headroom for context + OS). */
-function fits(m: CatalogRow, hw: { ramGb: number; freeGb: number }): boolean {
-  return m.minRamGb <= hw.ramGb && m.sizeGb + 10 <= hw.freeGb;
+/** Does a model physically fit? Mirrors the dispatcher's filter (`minRamGb` against usable
+ *  accelerator memory; 10GB disk headroom for context + a 2nd model). */
+function fits(m: CatalogRow, hw: { accelGb: number; freeGb: number }): boolean {
+  return m.minRamGb <= hw.accelGb && m.sizeGb + 10 <= hw.freeGb;
 }
 
 /** The full curated catalog (unfiltered) as parsed rows. */
@@ -249,18 +267,18 @@ async function listAll(): Promise<void> {
   const [catalog, installed] = await Promise.all([fetchCatalog().catch(() => [] as CatalogRow[]), installedModels()]);
   // Engine ids come back lowercased (Ollama normalizes, incl. hf.co/* tags) — compare case-insensitively.
   const have = new Set(installed.map((t) => t.toLowerCase()));
-  stdout.write(`\nYour Mac:  ${hw.ramGb}GB memory · ${hw.freeGb}GB free disk\n`);
+  stdout.write(`\nYour machine:  ${hw.accelGb}GB usable (${hw.kind}) · ${hw.freeGb}GB free disk\n`);
   stdout.write(`\nServing now (${installed.length}):\n`);
   stdout.write(installed.length ? installed.map((t) => `  ✓ ${t}`).join("\n") + "\n" : "  (none yet)\n");
   const addable = catalog.filter((m) => !have.has(m.tag.toLowerCase()) && fits(m, hw));
   const tooBig = catalog.filter((m) => !have.has(m.tag.toLowerCase()) && !fits(m, hw));
   if (addable.length) {
-    stdout.write(`\nAlso runnable on this Mac — add with \`koretex models add <tag>\` (higher ×pts / $ = prioritize):\n`);
+    stdout.write(`\nAlso runnable on this machine — add with \`koretex models add <tag>\` (higher ×pts / $ = prioritize):\n`);
     addable.sort((a, b) => b.pointsWeight - a.pointsWeight); // highest-paying first
     addable.forEach((m) => stdout.write(`  + ${m.tag.padEnd(22)} ${fmtRow(m)}\n`));
   }
   if (tooBig.length) {
-    stdout.write(`\nIn the catalog but need a bigger Mac:\n`);
+    stdout.write(`\nIn the catalog but need more accelerator memory:\n`);
     tooBig.forEach((m) => stdout.write(`  · ${m.tag.padEnd(22)} needs ${m.minRamGb}GB / ${m.sizeGb + 10}GB free\n`));
   }
   stdout.write(`\nThe list above is just our suggestions — you can serve ANY model:\n`);
@@ -292,10 +310,10 @@ async function interactive(): Promise<void> {
   const [catalog, installed] = await Promise.all([fetchCatalog().catch(() => [] as CatalogRow[]), installedModels()]);
   const have = new Set(installed.map((t) => t.toLowerCase())); // engine ids are lowercased
   const choices = catalog.filter((m) => !have.has(m.tag.toLowerCase()) && fits(m, hw));
-  stdout.write(`\nYour Mac:  ${hw.ramGb}GB memory · ${hw.freeGb}GB free disk\n`);
+  stdout.write(`\nYour machine:  ${hw.accelGb}GB usable (${hw.kind}) · ${hw.freeGb}GB free disk\n`);
   stdout.write(`Serving now: ${installed.length ? installed.join(", ") : "(none)"}\n`);
   if (!choices.length) {
-    stdout.write("\nNothing more this Mac can add right now (everything that fits is already installed).\n");
+    stdout.write("\nNothing more this machine can add right now (everything that fits is already installed).\n");
     return;
   }
   stdout.write(`\nModels you can add (coding · reasoning · agentic tool calling):\n`);

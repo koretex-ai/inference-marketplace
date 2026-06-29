@@ -13,17 +13,40 @@ export type JobId = string;
 
 /** What machine a node runs on. Detected at startup; advertised on register. All optional so
  *  older agents (and non-Mac nodes) still register cleanly. No serials/MACs — nothing that
- *  deanonymizes the provider's machine beyond what scheduling/inventory actually needs. */
+ *  deanonymizes the provider's machine beyond what scheduling/inventory actually needs.
+ *
+ *  Hardware-agnostic by design: a node may be an Apple Silicon Mac (unified memory), an NVIDIA
+ *  box (dedicated VRAM), or CPU-only. The fields below describe ALL of them; the one the
+ *  scheduler gates model-fit on is `acceleratorMemGb` (NOT `ramGb` — system RAM only equals GPU
+ *  memory on Apple Silicon; on an NVIDIA card the real ceiling is VRAM). */
 export interface NodeHardware {
-  /** CPU/chip brand, e.g. "Apple M2 Pro". */
+  /** CPU/chip brand, e.g. "Apple M2 Pro" or "AMD Ryzen 9 7950X". */
   chip?: string;
-  /** CPU architecture, e.g. "arm64". */
+  /** CPU architecture, e.g. "arm64" or "x64". */
   arch?: string;
+  /** OS family: "macos" | "linux" | "windows". */
+  os?: "macos" | "linux" | "windows" | string;
   /** Logical CPU cores. */
   cpuCores?: number;
-  /** Total (unified) memory in whole GiB. */
+  /** Total system memory in whole GiB. On Apple Silicon this is also the GPU's (unified) memory. */
   ramGb?: number;
-  /** macOS product version, e.g. "14.5". */
+  /** Accelerator family the inference engine runs on:
+   *   - "apple"  — Apple Silicon GPU, addresses (most of) unified memory
+   *   - "nvidia" — discrete GPU, bounded by dedicated VRAM
+   *   - "cpu"    — no GPU offload; allowed but slow, the router measures it and routes demand away
+   *  Absent on older agents. Drives cross-platform model-fit and display. */
+  gpuKind?: "apple" | "nvidia" | "cpu" | string;
+  /** Human accelerator name, e.g. "Apple M2 Pro" or "NVIDIA GeForce RTX 4090". */
+  gpuName?: string;
+  /** Dedicated video memory in whole GiB (NVIDIA, summed across cards). Undefined on Apple Silicon
+   *  (memory is unified) and CPU-only nodes. */
+  vramGb?: number;
+  /** Memory actually usable by the inference engine, in whole GiB — THE number model-fit gates on.
+   *  Apple Silicon: (most of) unified memory · NVIDIA: total VRAM · CPU-only: a fraction of system
+   *  RAM. The cross-platform replacement for the old "gate on ramGb" (which only held when system
+   *  RAM == GPU memory, i.e. on a Mac). */
+  acceleratorMemGb?: number;
+  /** macOS product version, e.g. "14.5". Mac only. */
   macosVersion?: string;
   /** Node-agent build, for fleet ops. */
   agentVersion?: string;

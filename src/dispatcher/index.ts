@@ -497,41 +497,107 @@ function runInternalJob(node: ConnectedNode, body: unknown, timeoutMs = 30_000):
 
 const send = (ws: WebSocket, msg: DispatcherMessage) => ws.send(JSON.stringify(msg));
 
-// ---- Reputation cache (R2): nodeId -> current points score, refreshed periodically from the
-// points store. Routing reads this hot, so we don't hit the DB per request.
+// ---- Routing caches (R2): nodeId -> live signals, refreshed periodically from the points store so
+// routing reads them hot (no DB hit per request). `reputationByNode` is the quality signal; the
+// prober's MEASURED throughput is the speed signal — you can't earn fast-lane traffic by claiming
+// fast hardware, only by demonstrating it.
 const reputationByNode = new Map<string, number>();
+const throughputByNode = new Map<string, number>(); // measured tokens/sec (0 until first probe)
 const REP_REFRESH_MS = Number(process.env.REP_REFRESH_MS ?? 30_000);
-// Exploration floor: brand-new nodes (reputation ~0) still get traffic so they can build history
-// — otherwise reputation routing would starve newcomers and they could never earn their first job.
+// Exploration floors: brand-new / never-probed nodes still get traffic so they can build history
+// — otherwise routing would starve newcomers and they could never earn their first job (or their
+// first throughput measurement). REP_BASE keeps low-rep nodes in play; TPS_BASE does the same on
+// the speed axis.
 const REP_BASE = Number(process.env.REP_BASE ?? 10);
+const TPS_BASE = Number(process.env.TPS_BASE ?? 5);
 
 async function refreshReputation(): Promise<void> {
   try {
     const scores = await points.nodeScores({ now: Date.now() });
     reputationByNode.clear();
-    for (const s of scores) reputationByNode.set(s.nodeId, s.points);
+    throughputByNode.clear();
+    for (const s of scores) {
+      reputationByNode.set(s.nodeId, s.points);
+      throughputByNode.set(s.nodeId, s.tokensPerSec);
+    }
   } catch (e) {
     console.error("[reputation] refresh failed:", (e as Error)?.message ?? e);
   }
 }
 
-// ---- Scheduler: pick a node for a model. Reputation-weighted (R2): prefer high-reputation nodes,
-// balanced against current load. weight = (reputation + base) / (inflight + 1). The base lets idle
-// newcomers win when proven nodes are busy, so good hardware earns more traffic without starving
-// new supply. (Price/latency/region weighting still to layer in — M2.)
-function pickNode(model: string): ConnectedNode | null {
+// ---- Routing profiles: how the CUSTOMER wants this request optimized (better / faster / cheaper).
+// Each maps to weights on the two live axes — speed (measured tok/s) and quality (reputation) —
+// blended into a merit score, which is then divided by load so no single node gets swamped.
+// HARDWARE-BLIND: the scheduler never looks at gpuKind; a node wins by being measurably better for
+// what this request values. The Mac-vs-NVIDIA split is emergent — fast NVIDIA cards win `fast`,
+// big-memory Macs win the large models nothing else can hold (model-fit eligibility, below).
+// NOTE: per-provider price is platform-set today, so there's no live `cost` axis yet — `economy`
+// just de-emphasises speed (don't burn a fast node on latency-tolerant work) and leans on load to
+// fill idle capacity. When per-provider pricing lands, add a cost axis here without touching callers.
+type RouteProfile = "fast" | "economy" | "best" | "balanced";
+const PROFILE_WEIGHTS: Record<RouteProfile, { speed: number; quality: number }> = {
+  fast: { speed: 0.8, quality: 0.2 },
+  best: { speed: 0.2, quality: 0.8 },
+  balanced: { speed: 0.5, quality: 0.5 },
+  economy: { speed: 0.15, quality: 0.35 }, // low merit overall → load term dominates → fills idle nodes
+};
+const DEFAULT_PROFILE = ((p) => (p in PROFILE_WEIGHTS ? p : "balanced") as RouteProfile)(
+  (process.env.ROUTE_DEFAULT_PROFILE ?? "balanced") as RouteProfile,
+);
+
+// ---- Scheduler: pick the best node for a model, by what the request optimizes for.
+//   merit = w.speed·speed̂ + w.quality·qualitŷ           (̂ = normalised across eligible nodes, 0..1)
+//   score = merit / (inflight + 1)                        (load balancing, as before)
+// Eligibility is exact model match (the node advertises only models its hardware can hold — see the
+// catalog's accelerator-memory fit). The old reputation/load formula is the `balanced`-ish special
+// case of this; behaviour for a single eligible node is unchanged.
+function pickNode(model: string, profile: RouteProfile = DEFAULT_PROFILE): ConnectedNode | null {
+  const eligible: ConnectedNode[] = [];
+  for (const n of nodes.values()) if (n.caps.models.includes(model)) eligible.push(n);
+  if (eligible.length === 0) return null;
+
+  // Normalise each axis across the eligible set so weights are comparable. The +BASE keeps
+  // un-probed / low-rep nodes from normalising to 0 (which would lock them out of all traffic).
+  const maxRep = Math.max(REP_BASE, ...eligible.map((n) => reputationByNode.get(n.caps.nodeId) ?? 0));
+  const maxTps = Math.max(TPS_BASE, ...eligible.map((n) => throughputByNode.get(n.caps.nodeId) ?? 0));
+  const w = PROFILE_WEIGHTS[profile];
+
   let best: ConnectedNode | null = null;
-  let bestWeight = -1;
-  for (const n of nodes.values()) {
-    if (!n.caps.models.includes(model)) continue;
-    const rep = reputationByNode.get(n.caps.nodeId) ?? 0;
-    const weight = (rep + REP_BASE) / (n.inflight + 1);
-    if (weight > bestWeight) {
+  let bestScore = -1;
+  for (const n of eligible) {
+    const quality = ((reputationByNode.get(n.caps.nodeId) ?? 0) + REP_BASE) / (maxRep + REP_BASE);
+    const speed = ((throughputByNode.get(n.caps.nodeId) ?? 0) + TPS_BASE) / (maxTps + TPS_BASE);
+    const merit = w.speed * speed + w.quality * quality;
+    const score = merit / (n.inflight + 1);
+    if (score > bestScore) {
       best = n;
-      bestWeight = weight;
+      bestScore = score;
     }
   }
   return best;
+}
+
+// ---- Demand signal (OpenAI-compatible): how does the caller pick a routing profile?
+//   1. `X-Koretex-Optimize: fast|economy|best|balanced` header  (invisible to the OpenAI schema)
+//   2. a `model@profile` suffix, e.g. "gemma3:12b-it-qat@fast"  (works through any client/playground)
+//   3. otherwise the server default (ROUTE_DEFAULT_PROFILE)
+// Vanilla OpenAI clients send neither and route on the default — so the endpoint stays fully
+// OpenAI-compatible. `splitModelProfile` also returns the clean model id to match/forward to the
+// node (the engine never sees the @profile suffix).
+function asProfile(v: string | undefined): RouteProfile | null {
+  return v && v in PROFILE_WEIGHTS ? (v as RouteProfile) : null;
+}
+function splitModelProfile(model: string): { model: string; profile: RouteProfile | null } {
+  const at = model.lastIndexOf("@");
+  if (at <= 0) return { model, profile: null };
+  const suffix = model.slice(at + 1).toLowerCase();
+  const p = asProfile(suffix);
+  return p ? { model: model.slice(0, at), profile: p } : { model, profile: null };
+}
+function routeProfile(req: http.IncomingMessage, modelProfile: RouteProfile | null): RouteProfile {
+  const hdr = req.headers["x-koretex-optimize"];
+  const fromHeader = asProfile((Array.isArray(hdr) ? hdr[0] : hdr)?.toLowerCase());
+  return fromHeader ?? modelProfile ?? DEFAULT_PROFILE; // header > model-suffix > default
 }
 
 // ---------------------------------------------------------------- WS (node) plane
@@ -1326,10 +1392,15 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
 
   // Model catalog. Plain JSON for the web; ?format=text&ram=&disk= → fitting models for the installer.
   if (req.method === "GET" && url.pathname === "/models/catalog") {
+    // Cross-platform model-fit: gate on the memory the ENGINE can actually use — unified memory
+    // (Apple), VRAM (NVIDIA), or capped RAM (CPU). Newer installers/agents pass `accel` (or `vram`);
+    // older Mac installers pass `ram` (== unified memory), so fall back to it. `minRamGb` is the
+    // model's memory floor and means the same thing against any of them.
     const ram = Number(url.searchParams.get("ram"));
+    const accel = Number(url.searchParams.get("accel")) || Number(url.searchParams.get("vram")) || ram;
     const disk = Number(url.searchParams.get("disk"));
     let models = MODELS;
-    if (ram) models = models.filter((m) => m.minRamGb <= ram);
+    if (accel) models = models.filter((m) => m.minRamGb <= accel);
     if (disk) models = models.filter((m) => m.sizeGb + 10 <= disk); // headroom for context + a 2nd model
     // primary first, then grouped by type (text → vision → code), then smallest-to-largest
     const typeRank: Record<string, number> = { text: 0, vision: 1, code: 2 };
@@ -1438,9 +1509,13 @@ function handleChat(req: http.IncomingMessage, res: http.ServerResponse) {
     } catch {
       return json(res, 400, { error: { message: "invalid json" } });
     }
-    const model = parsed?.model;
-    if (typeof model !== "string")
+    if (typeof parsed?.model !== "string")
       return json(res, 400, { error: { message: "model required" } });
+    // A `model@profile` suffix (and/or X-Koretex-Optimize header) selects the routing profile; the
+    // node/engine only ever sees the clean model id, so OpenAI compatibility is preserved.
+    const { model, profile: modelProfile } = splitModelProfile(parsed.model);
+    const profile = routeProfile(req, modelProfile);
+    parsed.model = model;
 
     // Metered callers must have credits. Pre-admission check (final cost is trued-up on completion;
     // a single large request can run a balance slightly negative — acceptable for the pilot).
@@ -1450,7 +1525,7 @@ function handleChat(req: http.IncomingMessage, res: http.ServerResponse) {
         return json(res, 402, { error: { message: "insufficient credits — top up at /credits", type: "insufficient_credits" } });
     }
 
-    const node = pickNode(model);
+    const node = pickNode(model, profile);
     if (!node)
       return json(res, 503, { error: { message: `no node available for model '${model}'` } });
 
@@ -1464,7 +1539,7 @@ function handleChat(req: http.IncomingMessage, res: http.ServerResponse) {
     });
 
     send(node.ws, { t: "job", jobId, body: parsed });
-    console.log(`[job] ${jobId} -> ${node.caps.nodeId} model=${model}${customerWallet ? ` metered(${customerWallet.slice(0, 6)}…)` : ""}`);
+    console.log(`[job] ${jobId} -> ${node.caps.nodeId} model=${model} route=${profile}${customerWallet ? ` metered(${customerWallet.slice(0, 6)}…)` : ""}`);
   });
 }
 

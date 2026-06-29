@@ -62,20 +62,79 @@ function resolveNodeId(): string {
   return stable;
 }
 
-/** Detect this machine's hardware once, at startup. Best-effort: every field is optional and
- *  falls back to Node's `os` when a `sysctl`/`sw_vers` probe isn't available (e.g. non-Mac).
- *  Absolute paths on purpose — the installed launchd service runs with a PATH that omits
+/** Detect an NVIDIA GPU via `nvidia-smi` (present on PATH wherever the driver is installed — Linux,
+ *  Windows, WSL). Sums VRAM across all cards: llama.cpp/Ollama split a model's layers across GPUs,
+ *  so the usable pool is the total. Returns null if there's no NVIDIA GPU (or no driver). */
+function detectNvidia(): { name: string; vramGb: number } | null {
+  const out = probe("nvidia-smi", ["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"]);
+  if (!out) return null;
+  let totalMiB = 0;
+  let name = "";
+  for (const line of out.split("\n").map((l) => l.trim()).filter(Boolean)) {
+    const [n, mem] = line.split(",").map((s) => s.trim());
+    const mib = Number(mem);
+    if (!Number.isFinite(mib) || mib <= 0) continue;
+    totalMiB += mib;
+    if (!name) name = n;
+  }
+  if (totalMiB <= 0) return null;
+  return { name: name || "NVIDIA GPU", vramGb: Math.round(totalMiB / 1024) };
+}
+
+/** Detect this machine's hardware once, at startup. Hardware-agnostic and best-effort: every field
+ *  is optional and degrades gracefully. The key output is `acceleratorMemGb` — the memory the engine
+ *  can actually use for weights+KV, which is what model-fit gates on:
+ *    • Apple Silicon → unified memory (system RAM IS GPU memory)
+ *    • NVIDIA        → total VRAM (NEVER system RAM — a 128GB box with a 24GB card fits 24GB models)
+ *    • CPU-only      → a fraction of system RAM (slow; allowed, but the router routes demand away)
+ *  Absolute paths for the Mac probes on purpose — the launchd service runs with a PATH that omits
  *  /usr/sbin (where sysctl lives), so a bare "sysctl" would silently ENOENT. */
 function collectHardware(): NodeHardware {
   const ramGb = Math.round(os.totalmem() / 1024 ** 3) || undefined;
-  return {
-    // sysctl gives the marketing name ("Apple M2 Pro"); os.cpus() is the fallback.
-    chip: probe("/usr/sbin/sysctl", ["-n", "machdep.cpu.brand_string"]) ?? os.cpus()?.[0]?.model,
+  const platform = os.platform(); // "darwin" | "linux" | "win32"
+  const osName = platform === "darwin" ? "macos" : platform === "win32" ? "windows" : "linux";
+  const base: NodeHardware = {
     arch: os.arch(),
+    os: osName,
     cpuCores: os.cpus()?.length || undefined,
     ramGb,
-    macosVersion: probe("/usr/bin/sw_vers", ["-productVersion"]),
     agentVersion: AGENT_VERSION,
+  };
+
+  // Apple Silicon: the GPU shares system RAM, so the whole unified pool is addressable.
+  if (platform === "darwin" && os.arch() === "arm64") {
+    const chip = probe("/usr/sbin/sysctl", ["-n", "machdep.cpu.brand_string"]) ?? os.cpus()?.[0]?.model;
+    return {
+      ...base,
+      chip,
+      macosVersion: probe("/usr/bin/sw_vers", ["-productVersion"]),
+      gpuKind: "apple",
+      gpuName: chip,
+      acceleratorMemGb: ramGb, // unified — gate on the full pool, exactly as before
+    };
+  }
+
+  // NVIDIA on any OS: the hard ceiling is VRAM, not system RAM.
+  const nv = detectNvidia();
+  if (nv) {
+    return {
+      ...base,
+      chip: os.cpus()?.[0]?.model,
+      gpuKind: "nvidia",
+      gpuName: nv.name,
+      vramGb: nv.vramGb,
+      acceleratorMemGb: nv.vramGb,
+    };
+  }
+
+  // No supported accelerator → CPU-only. Permissionless: we let it join, but cap usable memory at
+  // ~70% of system RAM and let the prober's measured throughput steer demand elsewhere.
+  return {
+    ...base,
+    chip: os.cpus()?.[0]?.model,
+    macosVersion: platform === "darwin" ? probe("/usr/bin/sw_vers", ["-productVersion"]) : undefined,
+    gpuKind: "cpu",
+    acceleratorMemGb: ramGb ? Math.round(ramGb * 0.7) : undefined,
   };
 }
 
@@ -170,7 +229,7 @@ function connect() {
     console.log(
       `connected to ${wsUrl} as ${NODE_ID}` +
         (identity ? ` (wallet ${identity.address})` : "") +
-        `; hw=[${hw.chip ?? "?"}, ${hw.ramGb ?? "?"}GB, macOS ${hw.macosVersion ?? "?"}]` +
+        `; hw=[${hw.gpuName ?? hw.chip ?? "?"}, ${hw.gpuKind ?? "?"}, ${hw.acceleratorMemGb ?? hw.ramGb ?? "?"}GB usable, ${hw.os ?? "?"}]` +
         `; models=[${models.join(", ")}]`,
     );
     heartbeat = setInterval(() => {

@@ -1,5 +1,6 @@
-// Local node control for providers: `koretex status | stop | start`. Wraps the launchd service
-// the installer set up, so a provider can pause/resume serving without hand-editing launchctl.
+// Local node control for providers: `koretex status | stop | start`. Wraps the OS service the
+// installer set up — launchd on macOS, systemd --user on Linux — so a provider can pause/resume
+// serving without hand-editing launchctl/systemctl.
 
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -7,8 +8,11 @@ import os from "node:os";
 import path from "node:path";
 import { loadIdentity } from "./identity.js";
 
-const LABEL = "com.koretex.node-agent";
+const IS_MAC = os.platform() === "darwin";
+const LABEL = "com.koretex.node-agent"; // launchd label (macOS)
+const UNIT = "koretex-node-agent"; // systemd --user unit (Linux) — must match install.sh
 const PLIST = path.join(os.homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
+const UNIT_FILE = path.join(os.homedir(), ".config", "systemd", "user", `${UNIT}.service`);
 const ENGINE_URL = process.env.ENGINE_URL ?? "http://127.0.0.1:11434";
 const uid = () => (typeof process.getuid === "function" ? process.getuid() : 0);
 
@@ -20,16 +24,26 @@ function sh(cmd: string): boolean {
     return false;
   }
 }
-const isRunning = () => sh(`launchctl print gui/${uid()}/${LABEL}`);
+
+const isRunning = () =>
+  IS_MAC ? sh(`launchctl print gui/${uid()}/${LABEL}`) : sh(`systemctl --user is-active --quiet ${UNIT}`);
+const isInstalled = () => existsSync(IS_MAC ? PLIST : UNIT_FILE);
 
 export function stop(): void {
   if (!isRunning()) return console.log("Node is already stopped.");
-  sh(`launchctl bootout gui/${uid()}/${LABEL}`);
+  if (IS_MAC) sh(`launchctl bootout gui/${uid()}/${LABEL}`);
+  else sh(`systemctl --user stop ${UNIT}`);
   console.log("⏸  Stopped serving. Run `koretex start` to resume.");
 }
 
 export function start(): void {
-  if (!existsSync(PLIST)) return console.log("Node isn't installed. Re-run the installer first.");
+  if (!isInstalled()) return console.log("Node isn't installed. Re-run the installer first.");
+  if (!IS_MAC) {
+    // systemd: restart is idempotent (starts if stopped, restarts if running).
+    if (sh(`systemctl --user restart ${UNIT}`)) console.log("▶️  Started — serving again.");
+    else console.log("Could not start the node. Re-run the installer.");
+    return;
+  }
   if (isRunning()) {
     sh(`launchctl kickstart -k gui/${uid()}/${LABEL}`);
     return console.log("▶️  Restarted — serving again.");
