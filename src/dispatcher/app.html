@@ -318,12 +318,25 @@
           <h3>Use the API</h3>
           <p class="note" style="margin-top:4px">OpenAI-compatible. Base URL <code id="pl_base" class="mono"></code> — point any OpenAI SDK at it with your key.</p>
           <div class="langtabs" id="pl_langtabs">
-            <button data-lang="curl" class="active">curl</button>
+            <button data-lang="endpoint" class="active">API endpoint</button>
+            <button data-lang="curl">curl</button>
             <button data-lang="python">Python</button>
             <button data-lang="js">JavaScript</button>
           </div>
-          <div class="codeblock block" style="margin-top:8px"><code id="pl_code">—</code></div>
-          <button class="btn btn-ghost btn-sm" id="pl_copy" style="margin-top:10px">Copy</button>
+          <div class="codeblock block hidden" style="margin-top:8px" id="pl_codebox"><code id="pl_code">—</code></div>
+          <button class="btn btn-ghost btn-sm hidden" id="pl_copy" style="margin-top:10px">Copy</button>
+          <!-- "API endpoint" tab: bare URL + key for no-code apps (e.g. Hermes) -->
+          <div id="pl_endpoint" style="margin-top:8px">
+            <p class="note" style="margin-top:0">Paste these into any app that asks for an OpenAI-compatible base URL and API key.</p>
+            <label style="margin-top:10px">Base URL</label>
+            <div class="keyrow"><code id="pl_ep_url" class="addr" style="flex:1"></code><button class="btn btn-ghost btn-sm" data-copy="pl_ep_url">Copy</button></div>
+            <label style="margin-top:14px">API key</label>
+            <div id="pl_ep_haskey" class="keyrow"><code id="pl_ep_key" class="addr" style="flex:1"></code><button class="btn btn-ghost btn-sm" data-copy="pl_ep_key">Copy</button></div>
+            <div id="pl_ep_nokey" class="hidden">
+              <div class="keyrow"><span class="note" style="margin:0">No API key in this tab yet.</span><button class="btn btn-grad btn-sm" id="pl_ep_create">Create API key</button></div>
+              <p class="note" style="margin-top:8px">Already have one? Paste it in the “Your API key” box above — full keys are only shown once, so we can't display an existing key here.</p>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -862,7 +875,7 @@
 
   // ===================================================================== PLAYGROUND
   const Play = {
-    models: [], keys: [], lang: "curl", key: null, messages: [], streaming: false,
+    models: [], keys: [], lang: "endpoint", key: null, messages: [], streaming: false,
     keyKey: () => "kx_apikey_" + address,
     loadStoredKey() { try { return sessionStorage.getItem(Play.keyKey()); } catch { return null; } },
     setKey(k) { Play.key = k || null; try { if (k) sessionStorage.setItem(Play.keyKey(), k); } catch {} Play.renderKeyState(); Play.renderSamples(); },
@@ -966,7 +979,19 @@
       } catch (e) { show($("pl_chatout"), "err", (e && e.message) || String(e)); }
       finally { Play.streaming = false; Play.renderKeyState(); }
     },
+    renderEndpoint() {
+      $("pl_ep_url").textContent = Play.baseUrl();
+      const has = !!Play.key;
+      $("pl_ep_haskey").classList.toggle("hidden", !has);
+      $("pl_ep_nokey").classList.toggle("hidden", has);
+      if (has) $("pl_ep_key").textContent = Play.key;
+    },
     renderSamples() {
+      const endpoint = Play.lang === "endpoint";
+      $("pl_endpoint").classList.toggle("hidden", !endpoint);
+      $("pl_codebox").classList.toggle("hidden", endpoint);
+      $("pl_copy").classList.toggle("hidden", endpoint);
+      if (endpoint) { Play.renderEndpoint(); return; }
       const base = Play.baseUrl();
       const key = Play.key || "YOUR_API_KEY";
       const model = ($("pl_model") && $("pl_model").value) || (Play.models[0] && Play.models[0].id) || "gemma3:12b-it-qat";
@@ -993,6 +1018,8 @@
   $("pl_model").addEventListener("change", () => Play.renderSamples());
   $("pl_langtabs").addEventListener("click", (e) => { const b = e.target.closest("button[data-lang]"); if (!b) return; Play.lang = b.dataset.lang; [...$("pl_langtabs").children].forEach((x) => x.classList.toggle("active", x === b)); Play.renderSamples(); });
   $("pl_copy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("pl_code").textContent); $("pl_copy").textContent = "Copied"; setTimeout(() => { $("pl_copy").textContent = "Copy"; }, 1200); } catch {} });
+  $("pl_ep_create").addEventListener("click", () => Play.createKey());
+  $("pl_endpoint").addEventListener("click", async (e) => { const b = e.target.closest("button[data-copy]"); if (!b) return; try { await navigator.clipboard.writeText($(b.dataset.copy).textContent); const t = b.textContent; b.textContent = "Copied"; setTimeout(() => { b.textContent = t; }, 1200); } catch {} });
 
   // ===================================================================== RUN A NODE
   const Run = {
