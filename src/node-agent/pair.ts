@@ -16,7 +16,7 @@ const TIMEOUT_MS = 10 * 60_000;
 async function main() {
   const existing = loadIdentity();
   if (existing && process.env.FORCE !== "1") {
-    console.log(`\n  This Mac is already linked to wallet ${existing.address}.`);
+    console.log(`\n  This machine is already linked to wallet ${existing.address}.`);
     console.log(`  Re-pair with a different wallet:  FORCE=1 npm run pair\n`);
     return;
   }
@@ -25,15 +25,17 @@ async function main() {
   if (!initRes.ok) throw new Error(`pair/init failed: HTTP ${initRes.status} from ${httpBase}`);
   const init = (await initRes.json()) as { pairingCode: string; claimSecret: string; connectUrl: string };
 
-  console.log("\n  Link this Mac to your wallet");
+  console.log("\n  Link this machine to your wallet");
   console.log("  ───────────────────────────");
   console.log("  Open this link in a browser with Phantom and connect your wallet:\n");
   console.log(`    ${init.connectUrl}\n`);
   console.log(`  (pairing code ${init.pairingCode})`);
   console.log("  Waiting for you to sign…  Ctrl-C to cancel.\n");
 
-  // Best-effort auto-open on macOS; harmless if it fails (the link is printed above).
-  try { spawn("open", [init.connectUrl], { stdio: "ignore", detached: true }).unref(); } catch {}
+  // Best-effort auto-open of the link (the link is printed above, so headless boxes just open it
+  // on another device): macOS `open`, Linux `xdg-open`, Windows `start`. Harmless if it fails.
+  const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+  try { spawn(opener, [init.connectUrl], { stdio: "ignore", detached: true, shell: process.platform === "win32" }).unref(); } catch {}
 
   const deadline = Date.now() + TIMEOUT_MS;
   for (;;) {

@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# One-command Koretex provider install (P1). Run:
+# One-command Koretex provider install. Run:
 #   curl -fsSL https://dispatcher.koretex.ai/install | bash
 #
-# Checks the Mac, installs Node if needed, downloads + runs a pinned inference engine that
-# Koretex manages itself (so the user's own Ollama version can't break anything), pulls a
-# model, installs the agent, links the wallet, and enables auto-start. Re-running is safe.
+# HARDWARE-AGNOSTIC: works on Apple Silicon Macs (Metal), Linux+NVIDIA (CUDA), and CPU-only
+# machines. Windows providers: install WSL2 (Ubuntu) and run this inside it — WSL2 exposes the
+# NVIDIA GPU to Linux, so it follows the Linux+NVIDIA path.
+#
+# Checks the machine, installs Node if needed, downloads + runs a pinned inference engine that
+# Koretex manages itself (so the user's own Ollama can't break anything), pulls a model, installs
+# the agent, links the wallet, and enables auto-start. Re-running is safe.
 set -euo pipefail
 
 DISPATCHER="${DISPATCHER:-https://dispatcher.koretex.ai}"
@@ -15,58 +19,98 @@ WS_DISPATCHER="${WS_DISPATCHER/http:/ws:}"
 
 KDIR="$HOME/.koretex"
 AGENT="$KDIR/koretex-agent.cjs"
-LABEL="com.koretex.node-agent"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
-# Managed inference engine — a pinned, checksum-verified Ollama we run ourselves on our own
-# port, so we never depend on whatever Ollama (if any) the user has installed.
+# --- Platform + accelerator detection ------------------------------------------
+OS="$(uname -s)"
+ARCH="$(uname -m)"
+
+detect_ram_gb() {
+  case "$OS" in
+    Darwin) echo $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 )) ;;
+    Linux)  echo $(( $(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null || echo 0) / 1048576 )) ;;
+    *)      echo 0 ;;
+  esac
+}
+detect_vram_gb() {
+  command -v nvidia-smi >/dev/null 2>&1 || { echo 0; return; }
+  local mib
+  mib="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | awk '{s+=$1} END{print int(s)}')"
+  echo $(( ${mib:-0} / 1024 ))
+}
+
+RAM_GB="$(detect_ram_gb)"
+VRAM_GB="$(detect_vram_gb)"
+# ACCEL_GB = memory the engine can actually use (drives model-fit + context sizing).
+if [ "$OS" = "Darwin" ] && [ "$ARCH" = "arm64" ]; then
+  ACCEL_KIND="apple"; ACCEL_GB="$RAM_GB"; BACKEND_DEFAULT="mlx"
+elif (( VRAM_GB > 0 )); then
+  ACCEL_KIND="nvidia"; ACCEL_GB="$VRAM_GB"; BACKEND_DEFAULT="cuda"
+else
+  ACCEL_KIND="cpu"; ACCEL_GB=$(( RAM_GB * 7 / 10 )); BACKEND_DEFAULT="cpu"
+fi
+
+# --- Managed inference engine — pinned, checksum-verified Ollama on our own port ---------------
 OLLAMA_VERSION="0.30.10"
-OLLAMA_URL="https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/ollama-darwin.tgz"
-OLLAMA_SHA256="ad8a4d2918ed09480b8160419570602b4f49e48c9e3792efb601c0f54619e48e"
 OLLAMA_DIR="$KDIR/engine"
-OLLAMA_BIN="$OLLAMA_DIR/ollama"
 OLLAMA_ADDR="127.0.0.1:11435"             # off the default 11434 to avoid any system Ollama
 ENGINE_URL="http://$OLLAMA_ADDR"
-OLLAMA_LABEL="com.koretex.ollama"
-OLLAMA_PLIST="$HOME/Library/LaunchAgents/$OLLAMA_LABEL.plist"
+
+# Per-platform asset + pinned SHA256 (verified against the GitHub release's published digests). Each
+# platform pins its OWN checksum and compression; set KORETEX_ENGINE_SHA256 to override on a new
+# arch. We fail closed if a platform's checksum is still a placeholder. macOS ships a gzip .tgz whose
+# `ollama` binary sits at the archive root; Linux ships a zstd .tar.zst laid out as bin/ + lib/ollama.
+case "$OS" in
+  Darwin)
+    OLLAMA_ASSET="ollama-darwin.tgz"; ENGINE_COMPRESS="gzip"
+    OLLAMA_SHA256="${KORETEX_ENGINE_SHA256:-ad8a4d2918ed09480b8160419570602b4f49e48c9e3792efb601c0f54619e48e}"
+    OLLAMA_BIN="$OLLAMA_DIR/ollama"; ENGINE_LIB_KEY="DYLD_LIBRARY_PATH"; ENGINE_LIB_DIR="$OLLAMA_DIR"
+    ;;
+  Linux)
+    ENGINE_COMPRESS="zstd"
+    case "$ARCH" in
+      x86_64|amd64)  OLLAMA_ASSET="ollama-linux-amd64.tar.zst"; OLLAMA_SHA256="${KORETEX_ENGINE_SHA256:-046d8f28e58d58477a49558d8d1bcb2e81ca8b287f93c44b12ff919c10d178dd}" ;;
+      aarch64|arm64) OLLAMA_ASSET="ollama-linux-arm64.tar.zst"; OLLAMA_SHA256="${KORETEX_ENGINE_SHA256:-b626aef722ddb9d64dd20a76eeba9267abc5e9494faabb97839db85462b707d7}" ;;
+      *) echo "Unsupported Linux architecture: $ARCH"; exit 1 ;;
+    esac
+    OLLAMA_BIN="$OLLAMA_DIR/bin/ollama"; ENGINE_LIB_KEY="LD_LIBRARY_PATH"; ENGINE_LIB_DIR="$OLLAMA_DIR/lib/ollama"
+    # WSL2 keeps the CUDA driver libs here — without it the engine can't see the GPU.
+    [ -d /usr/lib/wsl/lib ] && ENGINE_LIB_DIR="$ENGINE_LIB_DIR:/usr/lib/wsl/lib"
+    ;;
+  *)
+    echo "Unsupported OS '$OS'. On Windows, install WSL2 (Ubuntu) and run this installer inside it."
+    exit 1
+    ;;
+esac
+OLLAMA_URL="https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/${OLLAMA_ASSET}"
 
 bold() { printf "\n\033[1m%s\033[0m\n" "$1"; }
 
-# Robustly (re)load a launchd agent. On a re-install the label is already registered, and a
-# bare `bootstrap` then fails with "Input/output error" — so bootout first, settle, and fall
-# back to kickstart. Never let a transient launchctl hiccup abort the install (set -e).
-load_service() {
-  local label="$1" plist="$2" dom="gui/$(id -u)"
-  launchctl bootout "$dom/$label" 2>/dev/null || true
-  sleep 1
-  launchctl bootstrap "$dom" "$plist" 2>/dev/null \
-    || launchctl kickstart -k "$dom/$label" 2>/dev/null || true
-  launchctl enable "$dom/$label" 2>/dev/null || true
-}
-
-bold "Koretex provider setup"
-
 # 1. Eligibility (hard gate) -----------------------------------------------------
-bold "1/5  Checking this Mac…"
+bold "1/5  Checking this machine…"
 if ! curl -fsSL "$DISPATCHER/preflight" | DISPATCHER="$DISPATCHER" bash; then
-  echo "  Stopping — this Mac doesn't meet the requirements (see above)."; exit 1
+  echo "  Stopping — this machine doesn't meet the requirements (see above)."; exit 1
 fi
+echo "  Detected: ${ACCEL_KIND} accelerator, ~${ACCEL_GB}GB usable, OS ${OS}/${ARCH}"
 
 # 2. Node.js (the agent runs on it; the engine is managed below) ----------------
 bold "2/5  Node.js…"
 if ! command -v node >/dev/null 2>&1; then
-  if command -v brew >/dev/null 2>&1; then
+  if [ "$OS" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
     echo "  Installing Node via Homebrew…"; brew install node
   else
     echo ""
-    echo "  This Mac needs Node.js first (free). Install it, then re-run:"
+    echo "  This machine needs Node.js 20+ first (free). Install it, then re-run this installer:"
     echo ""
-    echo "    Node.js  →  https://nodejs.org"
-    echo "       Download the macOS \"LTS\" installer (.pkg), open it, click through."
+    if [ "$OS" = "Darwin" ]; then
+      echo "    Node.js  →  https://nodejs.org  (download the macOS LTS .pkg, open it, click through)"
+    else
+      echo "    Easiest:  install nvm then 'nvm install 20'   →  https://github.com/nvm-sh/nvm"
+      echo "    Or your distro's package (must be Node 20+):   e.g. 'sudo apt install nodejs npm'"
+    fi
     echo ""
     echo "  Then re-run:"
     if [ -n "${KORETEX_TOKEN:-}" ]; then
-      echo "    curl -fsSL $DISPATCHER/install | KORETEX_TOKEN=$KORETEX_TOKEN bash"
+      echo "    curl -fsSL $DISPATCHER/install | KORETEX_TOKEN=$KORETEX_TOKEN${KORETEX_WALLET:+ KORETEX_WALLET=$KORETEX_WALLET} bash"
     else
       echo "    curl -fsSL $DISPATCHER/install | bash"
     fi
@@ -78,68 +122,194 @@ echo "  ✓ Node $(node -v)  (the inference engine is managed by Koretex — not
 
 # 3. Managed inference engine + model ------------------------------------------
 bold "3/5  Setting up the inference engine…"
+# Fail closed if this platform's engine checksum hasn't been pinned yet (never run unverified).
+case "$OLLAMA_SHA256" in
+  PLACEHOLDER_*)
+    echo "  ✗ No pinned engine checksum for $OS/$ARCH yet."
+    echo "    Set the verified SHA256 of $OLLAMA_ASSET and re-run:"
+    echo "      curl -fsSL $DISPATCHER/install | KORETEX_ENGINE_SHA256=<sha256> bash"
+    exit 1
+    ;;
+esac
 mkdir -p "$KDIR" "$OLLAMA_DIR"
-if [ ! -x "$OLLAMA_BIN" ]; then
-  echo "  Downloading the Koretex engine (~137MB, first time only)…"
-  curl -fsSL -o "$KDIR/engine.tgz" "$OLLAMA_URL"
-  GOT="$(shasum -a 256 "$KDIR/engine.tgz" | awk '{print $1}')"
-  if [ "$GOT" != "$OLLAMA_SHA256" ]; then
-    echo "  ✗ engine checksum mismatch — aborting for safety."; rm -f "$KDIR/engine.tgz"; exit 1
-  fi
-  tar -xzf "$KDIR/engine.tgz" -C "$OLLAMA_DIR"
-  rm -f "$KDIR/engine.tgz"
+# Linux zstd bundles need the `zstd` tool to extract (matches Ollama's own installer requirement).
+if [ "$ENGINE_COMPRESS" = "zstd" ] && ! command -v zstd >/dev/null 2>&1; then
+  echo "  ✗ This engine needs 'zstd' to unpack. Install it and re-run:"
+  echo "      Debian/Ubuntu: sudo apt-get install -y zstd"
+  echo "      RHEL/Fedora:   sudo dnf install -y zstd"
+  echo "      Arch:          sudo pacman -S zstd"
+  exit 1
 fi
+if [ ! -x "$OLLAMA_BIN" ]; then
+  ARCHIVE="$KDIR/engine-download"
+  echo "  Downloading the Koretex engine ($OLLAMA_ASSET, first time only)…"
+  curl -fsSL -o "$ARCHIVE" "$OLLAMA_URL"
+  # shasum (macOS) or sha256sum (Linux).
+  if command -v shasum >/dev/null 2>&1; then GOT="$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')"
+  else GOT="$(sha256sum "$ARCHIVE" | awk '{print $1}')"; fi
+  if [ "$GOT" != "$OLLAMA_SHA256" ]; then
+    echo "  ✗ engine checksum mismatch — aborting for safety."; echo "    expected $OLLAMA_SHA256"; echo "    got      $GOT"
+    rm -f "$ARCHIVE"; exit 1
+  fi
+  echo "  Unpacking…"
+  if [ "$ENGINE_COMPRESS" = "zstd" ]; then
+    zstd -dc "$ARCHIVE" | tar -xf - -C "$OLLAMA_DIR"   # → $OLLAMA_DIR/bin/ollama + $OLLAMA_DIR/lib/ollama
+  else
+    tar -xzf "$ARCHIVE" -C "$OLLAMA_DIR"               # darwin: ollama binary at the archive root
+  fi
+  rm -f "$ARCHIVE"
+fi
+if [ ! -x "$OLLAMA_BIN" ]; then echo "  ✗ engine binary not found at $OLLAMA_BIN after extract."; exit 1; fi
+
 # Default context window for the managed engine. Ollama's stock default (~4096 tokens) is far too
-# small for agentic/coding clients, whose system prompt + tool schemas alone can fill it (leaving
-# almost nothing for the conversation → "context length exceeded" on the client). The OpenAI-compat
-# endpoint gives callers no way to raise it, so we set it on the engine. Scale it to this Mac's
-# memory so big rigs get a roomy window while 16GB Macs stay safe (KV cache is preallocated to this
-# size). Models cap it at their own native max; KORETEX_CONTEXT_LENGTH overrides.
-RAM_GB=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))
+# small for agentic/coding clients. Scale it to this machine's ACCELERATOR memory so big rigs get a
+# roomy window while small ones stay safe (KV cache is preallocated to this size). Models cap it at
+# their own native max; KORETEX_CONTEXT_LENGTH overrides.
 if [ -n "${KORETEX_CONTEXT_LENGTH:-}" ]; then CTX_LEN="$KORETEX_CONTEXT_LENGTH"
-elif [ "$RAM_GB" -ge 64 ]; then CTX_LEN=65536
-elif [ "$RAM_GB" -ge 32 ]; then CTX_LEN=32768
+elif [ "$ACCEL_GB" -ge 64 ]; then CTX_LEN=65536
+elif [ "$ACCEL_GB" -ge 32 ]; then CTX_LEN=32768
 else CTX_LEN=16384
 fi
 
-# Run the managed engine as its own launchd service (own port, auto-restart on login/crash).
-cat > "$OLLAMA_PLIST" <<OPLIST
+# Run the managed engine + agent as auto-restart services — launchd on macOS, systemd on Linux.
+# On Linux we prefer a SYSTEM service (managed by PID 1): rock-solid on WSL and headless boxes,
+# with none of the `systemctl --user` fragility (logind session / dbus-user-session / linger /
+# XDG_RUNTIME_DIR). It runs as the installing user so it still reaches ~/.koretex and the engine.
+NODE_BIN="$(command -v node)"
+NODE_PATH_DIR="$(dirname "$NODE_BIN")"
+AGENT_LABEL="com.koretex.node-agent"
+OLLAMA_LABEL="com.koretex.ollama"
+
+# Can we install a system service? "" if root, "sudo" if we can elevate (prompts on the tty), else
+# empty → fall back to a --user service. SUDO_OK marks that a system service is possible.
+SUDO=""; SUDO_OK=""
+if [ "$OS" != "Darwin" ]; then
+  if [ "$(id -u)" = 0 ]; then SUDO_OK=1
+  elif sudo -n true 2>/dev/null; then SUDO="sudo"; SUDO_OK=1
+  elif command -v sudo >/dev/null 2>&1 && [ -r /dev/tty ]; then SUDO="sudo"; SUDO_OK=1
+  fi
+fi
+
+start_engine_service() {
+  if [ "$OS" = "Darwin" ]; then
+    local plist="$HOME/Library/LaunchAgents/$OLLAMA_LABEL.plist"
+    cat > "$plist" <<OPLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>$OLLAMA_LABEL</string>
-  <key>ProgramArguments</key><array>
-    <string>$OLLAMA_BIN</string><string>serve</string>
-  </array>
+  <key>ProgramArguments</key><array><string>$OLLAMA_BIN</string><string>serve</string></array>
   <key>EnvironmentVariables</key><dict>
     <key>OLLAMA_HOST</key><string>$OLLAMA_ADDR</string>
-    <key>DYLD_LIBRARY_PATH</key><string>$OLLAMA_DIR</string>
+    <key>$ENGINE_LIB_KEY</key><string>$ENGINE_LIB_DIR</string>
     <key>OLLAMA_CONTEXT_LENGTH</key><string>$CTX_LEN</string>
   </dict>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>/tmp/koretex-ollama.log</string>
   <key>StandardErrorPath</key><string>/tmp/koretex-ollama.err</string>
 </dict></plist>
 OPLIST
-load_service "$OLLAMA_LABEL" "$OLLAMA_PLIST"
+    launchd_load "$OLLAMA_LABEL" "$plist"
+  else
+    systemd_unit "koretex-ollama" "Koretex inference engine" \
+      "$OLLAMA_BIN serve" \
+      "OLLAMA_HOST=$OLLAMA_ADDR" "$ENGINE_LIB_KEY=$ENGINE_LIB_DIR" "OLLAMA_CONTEXT_LENGTH=$CTX_LEN"
+  fi
+}
+
+start_agent_service() {
+  if [ "$OS" = "Darwin" ]; then
+    local plist="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
+    cat > "$plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$AGENT_LABEL</string>
+  <key>ProgramArguments</key><array><string>$NODE_BIN</string><string>$AGENT</string></array>
+  <key>EnvironmentVariables</key><dict>
+    <key>DISPATCHER_URL</key><string>$WS_DISPATCHER</string>
+    <key>ENGINE_URL</key><string>$ENGINE_URL</string>
+    <key>KORETEX_BACKEND</key><string>${KORETEX_BACKEND:-$BACKEND_DEFAULT}</string>
+    <key>PATH</key><string>$NODE_PATH_DIR:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/koretex-agent.log</string>
+  <key>StandardErrorPath</key><string>/tmp/koretex-agent.err</string>
+</dict></plist>
+PLIST
+    launchd_load "$AGENT_LABEL" "$plist"
+  else
+    systemd_unit "koretex-node-agent" "Koretex node agent" \
+      "$NODE_BIN $AGENT" \
+      "DISPATCHER_URL=$WS_DISPATCHER" "ENGINE_URL=$ENGINE_URL" \
+      "KORETEX_BACKEND=${KORETEX_BACKEND:-$BACKEND_DEFAULT}" \
+      "PATH=$NODE_PATH_DIR:/usr/local/bin:/usr/bin:/bin:/usr/lib/wsl/lib"
+  fi
+}
+
+# launchd: robustly (re)load a user agent — bootout first, then bootstrap, falling back to kickstart.
+launchd_load() {
+  local label="$1" plist="$2" dom="gui/$(id -u)"
+  launchctl bootout "$dom/$label" 2>/dev/null || true
+  sleep 1
+  launchctl bootstrap "$dom" "$plist" 2>/dev/null || launchctl kickstart -k "$dom/$label" 2>/dev/null || true
+  launchctl enable "$dom/$label" 2>/dev/null || true
+}
+
+# systemd: prefer a SYSTEM unit (runs under PID 1 as the installing user — robust on WSL/headless);
+# fall back to a --user unit (+linger) only when we can't elevate.
+systemd_unit() {
+  local name="$1" desc="$2" exec="$3"; shift 3
+  local unit="[Unit]
+Description=$desc
+After=network-online.target
+
+[Service]
+User=$USER
+"
+  local env
+  for env in "$@"; do unit="${unit}Environment=$env
+"; done
+  unit="${unit}ExecStart=$exec
+Restart=always
+RestartSec=3
+"
+  if [ -n "$SUDO_OK" ]; then
+    printf '%s\n[Install]\nWantedBy=multi-user.target\n' "$unit" | $SUDO tee "/etc/systemd/system/$name.service" >/dev/null
+    $SUDO systemctl daemon-reload 2>/dev/null || true
+    $SUDO systemctl enable "$name.service" >/dev/null 2>&1 || true
+    # restart (not `enable --now`) so a RE-install actually reloads the new unit/agent/node.json
+    # on an already-running service — `--now` is a no-op when the unit is already active.
+    $SUDO systemctl restart "$name.service" >/dev/null 2>&1 \
+      || echo "    (couldn't start $name — check: sudo systemctl status $name)"
+  else
+    # No way to elevate → --user unit (needs linger; the final message tells the user).
+    local dir="$HOME/.config/systemd/user"; mkdir -p "$dir"
+    printf '%s\n[Install]\nWantedBy=default.target\n' "$unit" | grep -v '^User=' > "$dir/$name.service"
+    loginctl enable-linger "$USER" 2>/dev/null || true
+    systemctl --user daemon-reload 2>/dev/null || true
+    systemctl --user enable "$name.service" 2>/dev/null || true
+    systemctl --user restart "$name.service" 2>/dev/null \
+      || echo "    (couldn't start $name via systemd --user — see Run-a-node troubleshooting)"
+  fi
+}
+
+start_engine_service
 echo "  Waiting for the engine…"
 for _ in $(seq 1 30); do curl -fsS "$ENGINE_URL/api/tags" >/dev/null 2>&1 && break; sleep 1; done
 
-# Choose a model that fits this Mac (filtered by RAM + free disk, server-side). RAM_GB was computed
-# above (for the engine context window); reuse it here.
-FREE_GB="$(df -g "$HOME" 2>/dev/null | tail -1 | awk '{print $4}')"
-FITTING="$(curl -fsS "$DISPATCHER/models/catalog?format=text&ram=$RAM_GB&disk=${FREE_GB:-0}" 2>/dev/null || true)"
+# Choose a model that fits this machine (filtered by ACCELERATOR memory + free disk, server-side).
+FREE_GB="$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2{print int($4/1048576)}')"
+FITTING="$(curl -fsS "$DISPATCHER/models/catalog?format=text&accel=$ACCEL_GB&disk=${FREE_GB:-0}" 2>/dev/null || true)"
 if [ -n "${KORETEX_MODEL:-}" ]; then
   MODEL="$KORETEX_MODEL"
 elif [ -n "${MODEL:-}" ]; then
   :
 elif [ -n "$FITTING" ] && [ -r /dev/tty ]; then
-  echo "  Models your Mac can run (×pts = points multiplier, \$/1M = what you earn — higher = prioritize):"
+  echo "  Models your machine can run (×pts = points multiplier, \$/1M = what you earn — higher = prioritize):"
   i=1; TAGS=""
   while IFS='|' read -r tag name size type minram caps weight credits; do
     [ -z "$tag" ] && continue
-    # credits/1M → $/1M at the 10000 credits/USDC peg (display only).
     usd=$(awk -v c="${credits:-0}" 'BEGIN{printf "%.2f", c/10000}')
     printf "    %d) %-28s [%-4s] ~%sGB%s   ·  ×%s pts · \$%s/1M\n" \
       "$i" "$name" "${type:-text}" "$size" "${caps:+   ·  ${caps//,/, }}" "${weight:-1.00}" "$usd"
@@ -153,7 +323,7 @@ EOF
   printf "  Choose a number, or paste any model tag [1]: "; read -r PICK < /dev/tty || PICK=1
   PICK="${PICK:-1}"
   case "$PICK" in
-    ''|*[!0-9]*) MODEL="$PICK" ;;                                   # non-numeric → treat as a literal model tag
+    ''|*[!0-9]*) MODEL="$PICK" ;;
     *)           MODEL="$(echo "$TAGS" | tr ' ' '\n' | sed -n "${PICK}p")" ;;
   esac
   [ -z "$MODEL" ] && MODEL="$(echo "$TAGS" | tr ' ' '\n' | sed -n '1p')"
@@ -175,54 +345,44 @@ fi
 bold "4/5  Installing the agent and linking your wallet…"
 curl -fsSL "$DISPATCHER/agent.js" -o "$AGENT"
 if [ -n "${KORETEX_TOKEN:-}" ]; then
-  # Website-first: the token was already minted when you connected your wallet on the site.
   printf '{"token":"%s","address":"%s"}\n' "$KORETEX_TOKEN" "${KORETEX_WALLET:-}" > "$KDIR/node.json"
   chmod 600 "$KDIR/node.json"
   echo "  Linked via your website wallet connection."
+elif [ "${KORETEX_ENROLL:-0}" = "1" ] || [ ! -r /dev/tty ]; then
+  # Headless (no terminal to drive Phantom, e.g. piped installs or the Hermes provider skill):
+  # self-custody enroll. Generates a local wallet and mints the node token + a customer key for
+  # this machine's OWN inference, no human in the loop. The secret stays in ~/.koretex/wallet.json.
+  echo "  No interactive terminal — linking headless with a self-custody wallet…"
+  DISPATCHER_URL="$WS_DISPATCHER" ENGINE_URL="$ENGINE_URL" KORETEX_DISPATCHER="$DISPATCHER" node "$AGENT" enroll
 else
-  # Agent-first: pair interactively (opens Phantom in your browser).
   DISPATCHER_URL="$WS_DISPATCHER" ENGINE_URL="$ENGINE_URL" node "$AGENT" pair
 fi
 
 # 5. Auto-start on login --------------------------------------------------------
 bold "5/5  Enabling auto-start…"
-NODE_BIN="$(command -v node)"
-mkdir -p "$HOME/Library/LaunchAgents"
-cat > "$PLIST" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>$LABEL</string>
-  <key>ProgramArguments</key><array>
-    <string>$NODE_BIN</string><string>$AGENT</string>
-  </array>
-  <key>EnvironmentVariables</key><dict>
-    <key>DISPATCHER_URL</key><string>$WS_DISPATCHER</string>
-    <key>ENGINE_URL</key><string>$ENGINE_URL</string>
-    <key>KORETEX_BACKEND</key><string>${KORETEX_BACKEND:-llama.cpp}</string>
-    <key>PATH</key><string>$(dirname "$NODE_BIN"):/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
-  </dict>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/tmp/koretex-agent.log</string>
-  <key>StandardErrorPath</key><string>/tmp/koretex-agent.err</string>
-</dict></plist>
-PLIST
-load_service "$LABEL" "$PLIST"
+start_agent_service
 
-# Install a `koretex` convenience command (status/stop/start) on PATH where we can.
-WRAP=""
+# Optional: let the agent pick the best-fitting, highest-demand model itself (used by unattended
+# installs / the Hermes provider skill). Runs after the service is up so the pull registers live.
+if [ "${KORETEX_AUTOSERVE:-0}" = "1" ]; then
+  echo "  Auto-selecting the best model to serve…"
+  ENGINE_URL="$ENGINE_URL" KORETEX_DISPATCHER="$DISPATCHER" node "$AGENT" autoserve || true
+fi
+
+# Install a `koretex` convenience command on PATH. Prefer a system bin that's already on PATH;
+# otherwise ~/.local/bin (login shells add it automatically when it exists) + wire the rc files.
+WRAP=""; NEEDS_PATH_HINT=0; KBIN="$HOME/.local/bin"
 for d in /opt/homebrew/bin /usr/local/bin; do
-  [ -w "$d" ] && { WRAP="$d/koretex"; break; }
+  [ -d "$d" ] && [ -w "$d" ] && { WRAP="$d/koretex"; break; }
 done
-ADDED_PATH=0
 if [ -z "$WRAP" ]; then
-  mkdir -p "$HOME/.koretex/bin"; WRAP="$HOME/.koretex/bin/koretex"
-  for rc in "$HOME/.zshrc" "$HOME/.bash_profile"; do
-    grep -qs 'koretex/bin' "$rc" 2>/dev/null || \
-      printf '\n# Koretex node control\nexport PATH="$HOME/.koretex/bin:$PATH"\n' >> "$rc"
+  mkdir -p "$KBIN"; WRAP="$KBIN/koretex"
+  case ":$PATH:" in *":$KBIN:"*) : ;; *) NEEDS_PATH_HINT=1 ;; esac
+  for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+    [ -e "$rc" ] || continue
+    grep -qs '# KORETEX PATH' "$rc" 2>/dev/null || \
+      printf '\n# KORETEX PATH\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$rc"
   done
-  ADDED_PATH=1
 fi
 cat > "$WRAP" <<WRAP_EOF
 #!/usr/bin/env bash
@@ -230,14 +390,25 @@ exec env ENGINE_URL="$ENGINE_URL" KORETEX_DISPATCHER="$DISPATCHER" "$NODE_BIN" "
 WRAP_EOF
 chmod +x "$WRAP"
 
-bold "✅ Done — this Mac is now a Koretex provider."
-echo "  Earnings go to the wallet you just linked.  See them at: $DISPATCHER/dashboard"
-if [ "$ADDED_PATH" = "1" ]; then
-  echo "  Control:  open a NEW terminal, then:  koretex status | koretex stop | koretex start"
-  echo "            (right now in this terminal:  export PATH=\"\$HOME/.koretex/bin:\$PATH\")"
-else
-  echo "  Control:  koretex status  |  koretex stop  |  koretex start"
+bold "✅ Done — this machine is now a Koretex provider."
+echo "  Accelerator: ${ACCEL_KIND} (~${ACCEL_GB}GB usable).  Earnings go to the wallet you linked."
+echo "  Dashboard:   $DISPATCHER/dashboard"
+echo ""
+echo "  Control your node:  koretex status | koretex stop | koretex start | koretex models"
+if [ "$NEEDS_PATH_HINT" = "1" ]; then
+  echo "    ↳ in THIS terminal first run:  export PATH=\"\$HOME/.local/bin:\$PATH\"   (new terminals pick it up automatically)"
 fi
-echo "  Models:   koretex models   (add/remove models to serve — more models = more demand you can earn from)"
-echo "  Logs:     agent /tmp/koretex-agent.log · engine /tmp/koretex-ollama.log"
+if [ "$OS" != "Darwin" ]; then
+  echo ""
+  if [ -n "$SUDO_OK" ]; then
+    echo "  Auto-starts via a systemd system service — survives logout and reboot. ✓"
+    echo "    Low-level control:  sudo systemctl status|stop|start koretex-node-agent"
+  else
+    echo "  IMPORTANT — installed as a --user service (no sudo available). Keep it running after"
+    echo "  logout with:  sudo loginctl enable-linger \"$USER\"   ·  control:  systemctl --user status koretex-node-agent"
+  fi
+  echo "    On WSL (Windows), to survive a full reboot also auto-launch the distro — see the dashboard's \"Run a node\" → troubleshooting."
+fi
+echo "  Logs:  agent /tmp/koretex-agent.log · engine /tmp/koretex-ollama.log"
+[ "$OS" = "Linux" ] && echo "         (or: journalctl --user -u koretex-node-agent -f)"
 echo ""

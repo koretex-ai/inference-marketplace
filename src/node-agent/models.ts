@@ -1,7 +1,7 @@
 // `koretex models` — let a provider add or remove models to serve, AFTER the first install.
 //
-//   koretex models            interactive picker: shows what fits this Mac, pull the ones you want
-//   koretex models ls         list installed models + what else this Mac can run
+//   koretex models            interactive picker: shows what fits this machine, pull the ones you want
+//   koretex models ls         list installed models + what else this machine can run
 //   koretex models add <tag…> pull one or more models — ANY Ollama tag or hf.co/* GGUF, not just
 //                             our catalog. After a pull we show what it earns and (if it isn't
 //                             priced yet) let you suggest a price for the operator.
@@ -29,22 +29,40 @@ interface CatalogRow {
   creditsPerMTok: number; // customer price you earn from
 }
 
-/** Total + free unified memory / disk for this Mac, to flag what fits. */
-function hardware(): { ramGb: number; freeGb: number } {
+/** Usable ACCELERATOR memory + free disk for this machine, to flag what fits. Mirrors the agent's
+ *  collectHardware(): Apple Silicon → unified memory · NVIDIA → total VRAM · CPU-only → capped RAM.
+ *  (Using system RAM on an NVIDIA box would wrongly offer models that don't fit in VRAM.) */
+function hardware(): { accelGb: number; freeGb: number; kind: string } {
   const ramGb = Math.round(os.totalmem() / 1024 ** 3) || 0;
+  // Free disk on $HOME, portable across macOS/Linux (POSIX `df -Pk` → 1024-blocks; col 4 = available).
   let freeGb = 0;
   try {
-    const out = execSync(`df -g "${os.homedir()}"`, { encoding: "utf8" }).trim().split("\n").pop() ?? "";
-    freeGb = Number(out.trim().split(/\s+/)[3]) || 0; // 4th column = available GB
+    const out = execSync(`df -Pk "${os.homedir()}"`, { encoding: "utf8" }).trim().split("\n").pop() ?? "";
+    freeGb = Math.floor((Number(out.trim().split(/\s+/)[3]) || 0) / 1048576);
   } catch {
     /* best-effort */
   }
-  return { ramGb, freeGb };
+  // NVIDIA VRAM via nvidia-smi (any OS), summed across cards. Try absolute paths too — WSL2 puts
+  // nvidia-smi under /usr/lib/wsl/lib, off the default PATH.
+  let vramGb = 0;
+  for (const smi of ["nvidia-smi", "/usr/bin/nvidia-smi", "/usr/local/bin/nvidia-smi", "/usr/lib/wsl/lib/nvidia-smi"]) {
+    try {
+      const out = execSync(`${smi} --query-gpu=memory.total --format=csv,noheader,nounits`, { encoding: "utf8", timeout: 3000 });
+      const mib = out.split("\n").map((l) => Number(l.trim())).filter((n) => Number.isFinite(n) && n > 0).reduce((a, b) => a + b, 0);
+      if (mib > 0) { vramGb = Math.round(mib / 1024); break; }
+    } catch {
+      /* try next location */
+    }
+  }
+  if (os.platform() === "darwin" && os.arch() === "arm64") return { accelGb: ramGb, freeGb, kind: "apple" };
+  if (vramGb > 0) return { accelGb: vramGb, freeGb, kind: "nvidia" };
+  return { accelGb: Math.round(ramGb * 0.7), freeGb, kind: "cpu" };
 }
 
-/** Does a model physically fit? Mirrors the dispatcher's filter (10GB headroom for context + OS). */
-function fits(m: CatalogRow, hw: { ramGb: number; freeGb: number }): boolean {
-  return m.minRamGb <= hw.ramGb && m.sizeGb + 10 <= hw.freeGb;
+/** Does a model physically fit? Mirrors the dispatcher's filter (`minRamGb` against usable
+ *  accelerator memory; 10GB disk headroom for context + a 2nd model). */
+function fits(m: CatalogRow, hw: { accelGb: number; freeGb: number }): boolean {
+  return m.minRamGb <= hw.accelGb && m.sizeGb + 10 <= hw.freeGb;
 }
 
 /** The full curated catalog (unfiltered) as parsed rows. */
@@ -249,18 +267,18 @@ async function listAll(): Promise<void> {
   const [catalog, installed] = await Promise.all([fetchCatalog().catch(() => [] as CatalogRow[]), installedModels()]);
   // Engine ids come back lowercased (Ollama normalizes, incl. hf.co/* tags) — compare case-insensitively.
   const have = new Set(installed.map((t) => t.toLowerCase()));
-  stdout.write(`\nYour Mac:  ${hw.ramGb}GB memory · ${hw.freeGb}GB free disk\n`);
+  stdout.write(`\nYour machine:  ${hw.accelGb}GB usable (${hw.kind}) · ${hw.freeGb}GB free disk\n`);
   stdout.write(`\nServing now (${installed.length}):\n`);
   stdout.write(installed.length ? installed.map((t) => `  ✓ ${t}`).join("\n") + "\n" : "  (none yet)\n");
   const addable = catalog.filter((m) => !have.has(m.tag.toLowerCase()) && fits(m, hw));
   const tooBig = catalog.filter((m) => !have.has(m.tag.toLowerCase()) && !fits(m, hw));
   if (addable.length) {
-    stdout.write(`\nAlso runnable on this Mac — add with \`koretex models add <tag>\` (higher ×pts / $ = prioritize):\n`);
+    stdout.write(`\nAlso runnable on this machine — add with \`koretex models add <tag>\` (higher ×pts / $ = prioritize):\n`);
     addable.sort((a, b) => b.pointsWeight - a.pointsWeight); // highest-paying first
     addable.forEach((m) => stdout.write(`  + ${m.tag.padEnd(22)} ${fmtRow(m)}\n`));
   }
   if (tooBig.length) {
-    stdout.write(`\nIn the catalog but need a bigger Mac:\n`);
+    stdout.write(`\nIn the catalog but need more accelerator memory:\n`);
     tooBig.forEach((m) => stdout.write(`  · ${m.tag.padEnd(22)} needs ${m.minRamGb}GB / ${m.sizeGb + 10}GB free\n`));
   }
   stdout.write(`\nThe list above is just our suggestions — you can serve ANY model:\n`);
@@ -292,10 +310,10 @@ async function interactive(): Promise<void> {
   const [catalog, installed] = await Promise.all([fetchCatalog().catch(() => [] as CatalogRow[]), installedModels()]);
   const have = new Set(installed.map((t) => t.toLowerCase())); // engine ids are lowercased
   const choices = catalog.filter((m) => !have.has(m.tag.toLowerCase()) && fits(m, hw));
-  stdout.write(`\nYour Mac:  ${hw.ramGb}GB memory · ${hw.freeGb}GB free disk\n`);
+  stdout.write(`\nYour machine:  ${hw.accelGb}GB usable (${hw.kind}) · ${hw.freeGb}GB free disk\n`);
   stdout.write(`Serving now: ${installed.length ? installed.join(", ") : "(none)"}\n`);
   if (!choices.length) {
-    stdout.write("\nNothing more this Mac can add right now (everything that fits is already installed).\n");
+    stdout.write("\nNothing more this machine can add right now (everything that fits is already installed).\n");
     return;
   }
   stdout.write(`\nModels you can add (coding · reasoning · agentic tool calling):\n`);
@@ -324,6 +342,133 @@ async function interactive(): Promise<void> {
     return;
   }
   await addTags(picks);
+}
+
+interface DemandRow {
+  model: string; // lowercased model id (Ollama normalizes), match catalog case-insensitively
+  completionTokens: number; // network-wide tokens served in the window — the "demand" signal
+  nodes: number; // how many nodes currently serve it — the "supply" signal
+  creditsPerMTok: number;
+  pointsWeight: number;
+}
+
+/** Network demand per model over the last `days`. Used to pick what's most worth serving. */
+async function fetchDemand(days: number): Promise<DemandRow[]> {
+  try {
+    const r = await fetch(`${DISPATCHER}/models/demand?days=${days}`);
+    if (!r.ok) return [];
+    const j: any = await r.json();
+    return (j?.models ?? []) as DemandRow[];
+  } catch {
+    return [];
+  }
+}
+
+/** `koretex autoserve [--days N] [--dry-run]` — pick the highest-UNMET-demand model that fits this
+ *  machine and start serving it, no human input. "Unmet" = demand discounted by existing supply
+ *  (tokens ÷ nodes-already-serving), so we avoid piling onto a model that's already oversupplied and
+ *  instead serve where our capacity is most likely to win jobs. On a cold network (no demand yet)
+ *  this falls back to the best-paying model that fits. Idempotent: a no-op if the pick is already
+ *  installed. This is what the unattended install + the Hermes provider skill call. */
+export async function autoserve(argv: string[]): Promise<void> {
+  const days = Math.max(1, Math.min(90, Number(argv[argv.indexOf("--days") + 1]) || 7));
+  const dryRun = argv.includes("--dry-run");
+  const hw = hardware();
+  const [catalog, demand, installed] = await Promise.all([
+    fetchCatalog().catch(() => [] as CatalogRow[]),
+    fetchDemand(days),
+    installedModels(),
+  ]);
+
+  const fitting = catalog.filter((m) => fits(m, hw));
+  if (!fitting.length) {
+    stdout.write(
+      `\nNothing in the catalog fits this machine (${hw.accelGb}GB usable / ${hw.freeGb}GB free).\n` +
+        `Add one by hand with a smaller tag:  koretex models add <tag>\n\n`,
+    );
+    return;
+  }
+
+  const dMap = new Map(demand.map((d) => [d.model.toLowerCase(), d]));
+  // Unmet demand per node (tokens ÷ supply+1); tie-break by earnings (price × points weight), then
+  // prefer the smaller model (cheaper to run, faster to pull, leaves room for a 2nd).
+  const score = (m: CatalogRow) => {
+    const d = dMap.get(m.tag.toLowerCase());
+    const unmet = d ? d.completionTokens / (d.nodes + 1) : 0;
+    return { unmet, pay: m.creditsPerMTok * m.pointsWeight, size: m.sizeGb };
+  };
+  const ranked = [...fitting].sort((a, b) => {
+    const sa = score(a), sb = score(b);
+    return sb.unmet - sa.unmet || sb.pay - sa.pay || sa.size - sb.size;
+  });
+  const pick = ranked[0];
+  const d = dMap.get(pick.tag.toLowerCase());
+
+  stdout.write(`\nMachine:  ${hw.accelGb}GB usable (${hw.kind}) · ${hw.freeGb}GB free disk\n`);
+  stdout.write(
+    `Best fit: ${pick.name} (${pick.tag})\n` +
+      `          demand ${d?.completionTokens?.toLocaleString() ?? 0} tok/${days}d · ${d?.nodes ?? 0} node(s) serving · ` +
+      `${pays(pick)}\n`,
+  );
+  // Show the next couple of runners-up so the choice is legible / auditable.
+  ranked.slice(1, 3).forEach((m) => {
+    const dd = dMap.get(m.tag.toLowerCase());
+    stdout.write(`  runner-up: ${m.tag.padEnd(22)} demand ${dd?.completionTokens ?? 0} · ${dd?.nodes ?? 0} node(s) · ${pays(m)}\n`);
+  });
+
+  const have = new Set(installed.map((t) => t.toLowerCase()));
+  if (have.has(pick.tag.toLowerCase())) {
+    stdout.write(`\n✓ Already serving ${pick.tag}. Nothing to do.\n\n`);
+    return;
+  }
+  if (dryRun) {
+    stdout.write(`\n(dry run — would pull and serve ${pick.tag})\n\n`);
+    return;
+  }
+  if (await pull(pick.tag)) nudgeAgent();
+}
+
+/** `koretex recommend [--json]` — print the best model for this machine to CONSUME its own inference
+ *  from (distinct from what it SERVES). The machine serves a small model it can host; for its own
+ *  work it should route through the network to the most capable agentic model someone is serving.
+ *  Picks: the largest agentic/tool-capable catalog model with at least one node serving it; falls
+ *  back to any served model, then to a model this machine hosts locally (the always-free floor).
+ *  Used by the Hermes provider skill to set the agent's primary model + local fallback. */
+export async function recommend(argv: string[]): Promise<void> {
+  const jsonOut = argv.includes("--json");
+  const [catalog, demand, installed] = await Promise.all([
+    fetchCatalog().catch(() => [] as CatalogRow[]),
+    fetchDemand(30),
+    installedModels(),
+  ]);
+  const supply = new Map(demand.map((d) => [d.model.toLowerCase(), d.nodes]));
+  const served = (m: CatalogRow) => (supply.get(m.tag.toLowerCase()) ?? 0) > 0;
+  const agentic = (m: CatalogRow) => m.caps.some((c) => ["agentic", "tools", "reasoning", "code"].includes(c));
+  const byCapability = (a: CatalogRow, b: CatalogRow) => b.sizeGb - a.sizeGb; // bigger ≈ more capable
+
+  const consume =
+    catalog.filter((m) => served(m) && agentic(m)).sort(byCapability)[0] ??
+    catalog.filter((m) => served(m)).sort(byCapability)[0] ??
+    null;
+  // The model this machine hosts itself — the free, always-available fallback for the agent.
+  const local = installed[0] ?? null;
+
+  if (jsonOut) {
+    console.log(
+      JSON.stringify({
+        consume: consume?.tag ?? local ?? null, // what to point the agent at (network), else local
+        consumeName: consume?.name ?? null,
+        local, // local Ollama tag for the fallback provider (free)
+        engineUrl: ENGINE_URL,
+        dispatcher: DISPATCHER,
+        openaiBase: `${DISPATCHER}/v1`,
+      }),
+    );
+    return;
+  }
+  stdout.write(`\nRecommended for THIS machine's own inference (via the network):\n`);
+  stdout.write(consume ? `  primary:  ${consume.tag} (${consume.name})\n` : `  primary:  (none served on the network yet)\n`);
+  stdout.write(local ? `  fallback: ${local} (served locally — free, always available)\n\n` : `  fallback: (none — this machine isn't serving a model yet; run koretex autoserve)\n\n`);
 }
 
 /** Entry point for `koretex models [ls|add|rm] …`. */
