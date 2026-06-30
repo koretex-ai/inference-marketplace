@@ -61,8 +61,10 @@ export class StripePayments {
           },
         },
       ],
-      success_url: `${p.origin}/app#credits?stripe=success`,
-      cancel_url: `${p.origin}/app#credits?stripe=cancel`,
+      // /credits is a real server route that serves the app on the Credits tab (see APP_PATHS in
+      // the dispatcher). The ?stripe= query is read by the app on return (Credits.handleReturn).
+      success_url: `${p.origin}/credits?stripe=success`,
+      cancel_url: `${p.origin}/credits?stripe=cancel`,
     });
     if (!session.url) throw new Error("stripe did not return a checkout url");
     return session.url;
