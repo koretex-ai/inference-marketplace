@@ -1202,6 +1202,10 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
         return json(res, 401, { error: { message: "signature verification failed" } });
       await providerStore.upsertProvider(pubkey);
       const token = await providerStore.mintToken(pubkey, "website");
+      // Headless/self-custody enrollers (e.g. the Hermes provider skill) may never open the
+      // dashboard, so seed their welcome credits here too — otherwise a brand-new node's first
+      // self-inference 402s before it has earned anything. Idempotent (keyed welcome:<wallet>).
+      await ensureWelcomeCredits(pubkey);
       return json(res, 200, { token, address: pubkey });
     });
   }
@@ -1434,6 +1438,7 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
     return readJson(req, res, async (b) => {
       const pubkey = authCreditsWallet(res, b);
       if (!pubkey) return;
+      await ensureWelcomeCredits(pubkey); // headless key-minters (Hermes skill) get the welcome grant too
       const key = await customerStore.mintKey(pubkey, "web");
       return json(res, 200, { key });
     });
