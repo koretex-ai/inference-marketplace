@@ -390,3 +390,12 @@ left to "money flowing" is **M4** (customer USDC funding + batched provider payo
 1. **Provider $/Mac/day** — supply must be already-idle Macs.
 2. **Embedding/batch throughput** on a real Mac — makes or breaks the batch use case.
 3. **Demand** for affordable big-memory / long-tail model access (interviews, not code).
+
+---
+
+## Deferred follow-ups
+- **Idle-gated serving (node-agent).** Serving is currently always-on: the node serves continuously
+  and relies on the dispatcher's least-inflight scheduler to route around a busy local node. Add an
+  opt-in policy that detects user/agent activity and `koretex stop`/`start`s around it, so serving
+  only runs when the machine is genuinely idle (lower contention, lower earnings). Surfaced by the
+  Hermes provider skill (`skills/koretex-node-provider`), which uses the always-on flow today.
