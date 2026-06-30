@@ -772,7 +772,12 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
       const short = (s) => s ? (s.length > 20 ? s.slice(0, 18) + "…" : s) : "—";
       const hwLabel = (hw, backend) => {
         if (!hw) return "—";
-        const parts = [hw.chip, hw.ramGb ? hw.ramGb + "GB" : null, hw.macosVersion ? "macOS " + hw.macosVersion : null].filter(Boolean);
+        // Prefer the accelerator view — GPU name + usable memory (VRAM on NVIDIA, unified on Apple).
+        // Fall back to chip + system RAM for older agents that didn't report the new fields.
+        const name = hw.gpuName || hw.chip;
+        const mem = hw.acceleratorMemGb || hw.vramGb || hw.ramGb;
+        const memLabel = mem ? mem + "GB" + (hw.vramGb ? " VRAM" : "") : null;
+        const parts = [name, memLabel, hw.macosVersion ? "macOS " + hw.macosVersion : null].filter(Boolean);
         let s = parts.length ? parts.join(" · ") : "—";
         if (backend && backend !== "unknown") s += " · " + backend;
         return s;

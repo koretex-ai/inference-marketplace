@@ -42,17 +42,17 @@ function hardware(): { accelGb: number; freeGb: number; kind: string } {
   } catch {
     /* best-effort */
   }
-  // NVIDIA VRAM via nvidia-smi (any OS), summed across cards.
+  // NVIDIA VRAM via nvidia-smi (any OS), summed across cards. Try absolute paths too — WSL2 puts
+  // nvidia-smi under /usr/lib/wsl/lib, off the default PATH.
   let vramGb = 0;
-  try {
-    const out = execSync("nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits", {
-      encoding: "utf8",
-      timeout: 3000,
-    });
-    const mib = out.split("\n").map((l) => Number(l.trim())).filter((n) => Number.isFinite(n) && n > 0).reduce((a, b) => a + b, 0);
-    vramGb = Math.round(mib / 1024);
-  } catch {
-    /* no NVIDIA GPU / driver */
+  for (const smi of ["nvidia-smi", "/usr/bin/nvidia-smi", "/usr/local/bin/nvidia-smi", "/usr/lib/wsl/lib/nvidia-smi"]) {
+    try {
+      const out = execSync(`${smi} --query-gpu=memory.total --format=csv,noheader,nounits`, { encoding: "utf8", timeout: 3000 });
+      const mib = out.split("\n").map((l) => Number(l.trim())).filter((n) => Number.isFinite(n) && n > 0).reduce((a, b) => a + b, 0);
+      if (mib > 0) { vramGb = Math.round(mib / 1024); break; }
+    } catch {
+      /* try next location */
+    }
   }
   if (os.platform() === "darwin" && os.arch() === "arm64") return { accelGb: ramGb, freeGb, kind: "apple" };
   if (vramGb > 0) return { accelGb: vramGb, freeGb, kind: "nvidia" };

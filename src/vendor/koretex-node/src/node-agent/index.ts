@@ -5,6 +5,7 @@
 // The engine stays bound to 127.0.0.1; the only way traffic reaches it is this agent.
 
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import os from "node:os";
 import { WebSocket } from "ws";
 import {
@@ -54,10 +55,21 @@ function resolveNodeId(): string {
   if (process.env.NODE_ID) return process.env.NODE_ID;
   const id = loadIdentity();
   if (id?.nodeId) return id.nodeId;
-  const ioreg = probe("/usr/sbin/ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"]);
-  const hwUuid = ioreg?.match(/"IOPlatformUUID"\s*=\s*"([0-9A-Fa-f-]+)"/)?.[1];
-  // Non-Mac / probe failure: fall back to the hostname — still deterministic, no random suffix.
-  const stable = hwUuid ? `mac-${hwUuid.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12)}` : `mac-${os.hostname()}`;
+  const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12);
+  let stable: string;
+  if (os.platform() === "darwin") {
+    // Apple Silicon: IOPlatformUUID is fixed per machine.
+    const ioreg = probe("/usr/sbin/ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"]);
+    const hwUuid = ioreg?.match(/"IOPlatformUUID"\s*=\s*"([0-9A-Fa-f-]+)"/)?.[1];
+    stable = hwUuid ? `mac-${clean(hwUuid)}` : `mac-${os.hostname()}`;
+  } else {
+    // Linux / Windows(WSL): the systemd machine-id is stable per install; else the hostname.
+    let mid: string | undefined;
+    for (const p of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) {
+      try { mid = readFileSync(p, "utf8").trim(); if (mid) break; } catch { /* try next */ }
+    }
+    stable = mid ? `node-${clean(mid)}` : `node-${os.hostname()}`;
+  }
   if (id) saveIdentity({ ...id, nodeId: stable }); // pin it so it can never drift on a later boot
   return stable;
 }
@@ -66,7 +78,14 @@ function resolveNodeId(): string {
  *  Windows, WSL). Sums VRAM across all cards: llama.cpp/Ollama split a model's layers across GPUs,
  *  so the usable pool is the total. Returns null if there's no NVIDIA GPU (or no driver). */
 function detectNvidia(): { name: string; vramGb: number } | null {
-  const out = probe("nvidia-smi", ["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"]);
+  // nvidia-smi isn't always on the service's minimal PATH — probe known absolute locations too.
+  // WSL2 ships it under /usr/lib/wsl/lib, which launchd/systemd PATHs don't include.
+  const args = ["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"];
+  let out: string | undefined;
+  for (const cmd of ["nvidia-smi", "/usr/bin/nvidia-smi", "/usr/local/bin/nvidia-smi", "/usr/lib/wsl/lib/nvidia-smi"]) {
+    out = probe(cmd, args);
+    if (out) break;
+  }
   if (!out) return null;
   let totalMiB = 0;
   let name = "";
