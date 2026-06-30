@@ -87,7 +87,7 @@ const USDC_MINT = process.env.USDC_MINT ?? USDC_MINT_MAINNET;
 // per-token inference in whole credits (see pricing.ts).
 const CREDITS_PER_USDC = Number(process.env.CREDITS_PER_USDC ?? 10000);
 // One-off welcome credits granted to every wallet (idempotent) so newcomers can test inference.
-const WELCOME_CREDITS = Number(process.env.WELCOME_CREDITS ?? 1000);
+const WELCOME_CREDITS = Number(process.env.WELCOME_CREDITS ?? 1_000_000);
 // Commitment used when reading deposits. 'finalized' (default) cannot roll back; 'confirmed' is faster.
 const SOLANA_COMMITMENT = process.env.SOLANA_COMMITMENT ?? "finalized";
 // Stripe (card) money-in — the fiat alternative to USDC. Optional: unset = card purchases are off
