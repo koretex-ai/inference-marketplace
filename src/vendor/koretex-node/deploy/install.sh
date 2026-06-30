@@ -251,8 +251,9 @@ systemd_unit() {
     echo "ExecStart=$exec"; echo "Restart=always"; echo "RestartSec=3"
     echo ""; echo "[Install]"; echo "WantedBy=default.target"
   } > "$dir/$name.service"
-  loginctl enable-linger "$USER" 2>/dev/null || sudo loginctl enable-linger "$USER" 2>/dev/null \
-    || echo "    (couldn't enable linger — the node will run only while you're logged in)"
+  # Linger keeps user services running after logout. Best-effort here (a piped installer can't
+  # prompt for sudo); if it doesn't take, the final message tells the user the one command to run.
+  loginctl enable-linger "$USER" 2>/dev/null || sudo -n loginctl enable-linger "$USER" 2>/dev/null || true
   systemctl --user daemon-reload 2>/dev/null || true
   systemctl --user enable --now "$name.service" 2>/dev/null \
     || echo "    (couldn't start $name via systemd --user — check: systemctl --user status $name)"
@@ -320,20 +321,20 @@ fi
 bold "5/5  Enabling auto-start…"
 start_agent_service
 
-# Install a `koretex` convenience command (models/status) on PATH where we can.
-WRAP=""
+# Install a `koretex` convenience command on PATH. Prefer a system bin that's already on PATH;
+# otherwise ~/.local/bin (login shells add it automatically when it exists) + wire the rc files.
+WRAP=""; NEEDS_PATH_HINT=0; KBIN="$HOME/.local/bin"
 for d in /opt/homebrew/bin /usr/local/bin; do
-  [ -w "$d" ] && { WRAP="$d/koretex"; break; }
+  [ -d "$d" ] && [ -w "$d" ] && { WRAP="$d/koretex"; break; }
 done
-ADDED_PATH=0
 if [ -z "$WRAP" ]; then
-  mkdir -p "$HOME/.koretex/bin"; WRAP="$HOME/.koretex/bin/koretex"
-  for rc in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
-    [ -e "$rc" ] || [ "$rc" = "$HOME/.profile" ] || continue
-    grep -qs 'koretex/bin' "$rc" 2>/dev/null || \
-      printf '\n# Koretex node control\nexport PATH="$HOME/.koretex/bin:$PATH"\n' >> "$rc"
+  mkdir -p "$KBIN"; WRAP="$KBIN/koretex"
+  case ":$PATH:" in *":$KBIN:"*) : ;; *) NEEDS_PATH_HINT=1 ;; esac
+  for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+    [ -e "$rc" ] || continue
+    grep -qs '# KORETEX PATH' "$rc" 2>/dev/null || \
+      printf '\n# KORETEX PATH\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$rc"
   done
-  ADDED_PATH=1
 fi
 cat > "$WRAP" <<WRAP_EOF
 #!/usr/bin/env bash
@@ -344,16 +345,18 @@ chmod +x "$WRAP"
 bold "✅ Done — this machine is now a Koretex provider."
 echo "  Accelerator: ${ACCEL_KIND} (~${ACCEL_GB}GB usable).  Earnings go to the wallet you linked."
 echo "  Dashboard:   $DISPATCHER/dashboard"
-if [ "$OS" = "Darwin" ]; then
-  if [ "$ADDED_PATH" = "1" ]; then
-    echo "  Control:  open a NEW terminal, then:  koretex status | koretex stop | koretex start"
-  else
-    echo "  Control:  koretex status  |  koretex stop  |  koretex start"
-  fi
-else
-  echo "  Control:  systemctl --user status|stop|start koretex-node-agent"
+echo ""
+echo "  Control your node:  koretex status | koretex stop | koretex start | koretex models"
+if [ "$NEEDS_PATH_HINT" = "1" ]; then
+  echo "    ↳ in THIS terminal first run:  export PATH=\"\$HOME/.local/bin:\$PATH\"   (new terminals pick it up automatically)"
 fi
-echo "  Models:   koretex models   (add/remove models to serve — more models = more demand)"
-echo "  Logs:     agent /tmp/koretex-agent.log · engine /tmp/koretex-ollama.log"
-[ "$OS" = "Linux" ] && echo "            (or: journalctl --user -u koretex-node-agent -f)"
+if [ "$OS" != "Darwin" ]; then
+  echo ""
+  echo "  IMPORTANT — keep the node running after you log out / close the terminal:"
+  echo "      sudo loginctl enable-linger \"$USER\""
+  echo "    Low-level control:  systemctl --user status|stop|start koretex-node-agent"
+  echo "    On WSL (Windows), also keep the distro alive — see the dashboard's \"Run a node\" → troubleshooting."
+fi
+echo "  Logs:  agent /tmp/koretex-agent.log · engine /tmp/koretex-ollama.log"
+[ "$OS" = "Linux" ] && echo "         (or: journalctl --user -u koretex-node-agent -f)"
 echo ""

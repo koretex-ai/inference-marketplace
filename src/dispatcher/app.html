@@ -461,18 +461,18 @@
 
     <!-- ================= RUN A NODE ================= -->
     <section class="panel" id="tab-run">
-      <span class="eyebrow">Earn from your Mac</span>
+      <span class="eyebrow">Earn from your computer</span>
       <h1>Run a node</h1>
-      <p class="sub">Rent your Apple Silicon Mac's idle time to run AI inference. You earn Koretex Points for the work your node does — with withdrawal coming in the future.</p>
+      <p class="sub">Rent your idle GPU/Mac time to run AI inference — <b>hardware-agnostic</b>: Apple Silicon Macs, NVIDIA GPUs (Linux or Windows via WSL2), even CPU. You earn Koretex Points for the work your node does, with withdrawal coming in the future. No hardware is favored — demand flows to whoever is fastest/cheapest/best for each request.</p>
 
       <div class="card">
         <h3>How it works</h3>
         <ol style="padding-left:1.1rem;margin-top:10px;color:var(--ink)">
           <li>Connect your account — it's your node's identity and where your points accrue.</li>
-          <li>Copy the one-line command it gives you and paste it into Terminal on your Mac.</li>
-          <li>Your Mac auto-starts, serves requests, and earns. Track it on your <a href="#dashboard" class="tablink" data-tab="dashboard">dashboard</a>.</li>
+          <li>Copy the one-line command below and run it in your terminal (see your platform's steps).</li>
+          <li>Your machine auto-starts, serves requests, and earns. Track it on your <a href="#dashboard" class="tablink" data-tab="dashboard">dashboard</a>.</li>
         </ol>
-        <p class="note">Requires an Apple Silicon Mac (16GB+). Your account's secret never leaves your device — you only sign a message to prove ownership.</p>
+        <p class="note">Works on: <b>Apple Silicon Mac</b> (16GB+), <b>Linux/Windows + NVIDIA GPU</b>, or CPU-only (slow, low demand). Your account's secret never leaves your device — you only sign a message to prove ownership.</p>
       </div>
 
       <div class="card">
@@ -481,26 +481,78 @@
         <button class="btn btn-grad" id="run_enroll" disabled>Log in first</button>
         <div id="run_out"></div>
         <div id="run_cmdbox" class="hidden">
-          <p style="margin:14px 0 0;font-weight:600">2 · Run this on your Mac — paste into Terminal:</p>
+          <p style="margin:14px 0 0;font-weight:600">2 · Run this in your terminal:</p>
           <div class="codeblock"><code id="run_cmd">—</code><button class="btn btn-ghost btn-sm" id="run_copy" style="background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.2)">Copy</button></div>
-          <p class="note">Linked to <span class="addr" id="run_who"></span> — earnings go here. Keep this command private; it contains your node token.</p>
+          <p class="note">Linked to <span class="addr" id="run_who"></span> — earnings go here. Keep this command private; it contains your node token. <b>Windows users: run it inside WSL2 Ubuntu, not PowerShell</b> (see below).</p>
         </div>
       </div>
 
       <div class="card">
-        <h3>Control it from Terminal</h3>
-        <p class="note" style="margin:4px 0 12px">After setup, manage your node with the <code>koretex</code> command — open a new Terminal window and run:</p>
+        <h3>2 · Set up your platform</h3>
+
+        <h4 style="margin:14px 0 4px"> macOS (Apple Silicon)</h4>
+        <p class="note">Open <b>Terminal</b> and paste the command above. That's it — it installs everything (engine, model, auto-start via launchd) and links your wallet.</p>
+
+        <h4 style="margin:18px 0 4px"> Windows (NVIDIA GPU) — via WSL2</h4>
+        <p class="note">The node runs inside WSL2 (a real Linux environment that uses your NVIDIA GPU). Do <b>not</b> run it in PowerShell — that's why <code>DISPATCHER=… is not recognized</code> appears.</p>
+        <ol style="padding-left:1.1rem;margin-top:6px;color:var(--ink)" class="note">
+          <li>In an <b>admin PowerShell</b>: <code>wsl --install</code>, reboot, finish Ubuntu setup (pick a username/password).</li>
+          <li>Enable systemd (so the node stays up): in <b>Ubuntu</b> run<div class="codeblock"><code>printf '[boot]\nsystemd=true\n' | sudo tee /etc/wsl.conf</code></div>then in PowerShell <code>wsl --shutdown</code> and reopen Ubuntu.</li>
+          <li>Confirm the GPU is visible: <code>nvidia-smi</code> (should list your card — no driver install needed inside WSL).</li>
+          <li>Install prerequisites:<div class="codeblock"><code>sudo apt-get update &amp;&amp; sudo apt-get install -y zstd
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sudo apt-get install -y nodejs</code></div></li>
+          <li>Paste the install command above into <b>Ubuntu</b> (not PowerShell).</li>
+          <li>Keep it running after you close the terminal: <code>sudo loginctl enable-linger $USER</code> (see "Keep your node running" below).</li>
+        </ol>
+
+        <h4 style="margin:18px 0 4px"> Linux (NVIDIA GPU or CPU)</h4>
+        <ol style="padding-left:1.1rem;margin-top:6px;color:var(--ink)" class="note">
+          <li>Install prerequisites:<div class="codeblock"><code>sudo apt-get update &amp;&amp; sudo apt-get install -y zstd
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sudo apt-get install -y nodejs</code></div>(RHEL/Fedora: <code>sudo dnf install -y zstd nodejs</code> · Arch: <code>sudo pacman -S zstd nodejs</code> — Node must be 20+.)</li>
+          <li>For an NVIDIA GPU, make sure the driver is installed (<code>nvidia-smi</code> works).</li>
+          <li>Paste the install command above, then run <code>sudo loginctl enable-linger $USER</code> to keep it running after logout.</li>
+        </ol>
+      </div>
+
+      <div class="card">
+        <h3>Control your node</h3>
+        <p class="note" style="margin:4px 0 12px">Manage your node with the <code>koretex</code> command. If it says <code>command not found</code>, open a <b>new</b> terminal, or run <code>export PATH="$HOME/.local/bin:$PATH"</code> (older installs: <code>$HOME/.koretex/bin</code>) — see troubleshooting.</p>
         <table class="cmd-table">
           <tr><td><code>koretex status</code></td><td class="note">Show your wallet link, whether you're serving, and which models are loaded.</td></tr>
-          <tr><td><code>koretex models</code></td><td class="note">Open the interactive model picker — shows every model that fits your Mac with its <b>×pts</b> multiplier and <b>$/1M</b>, sorted best-earner first, and pulls the ones you choose.</td></tr>
-          <tr><td><code>koretex models ls</code></td><td class="note">List what you're serving now, what else your Mac can run, and what needs a bigger Mac — each with its <b>×pts</b> and <b>$/1M</b>.</td></tr>
-          <tr><td><code>koretex models add &lt;tag&gt;</code></td><td class="note">Pull and start serving one or more models, e.g. <code>koretex models add qwen3:14b gpt-oss:20b</code>. Live as soon as the download finishes.</td></tr>
+          <tr><td><code>koretex models</code></td><td class="note">Interactive model picker — shows every model that fits <b>your hardware</b> with its <b>×pts</b> multiplier and <b>$/1M</b>, best-earner first, and pulls the ones you choose.</td></tr>
+          <tr><td><code>koretex models ls</code></td><td class="note">List what you're serving, what else your machine can run, and what needs more accelerator memory — each with its <b>×pts</b> and <b>$/1M</b>.</td></tr>
+          <tr><td><code>koretex models add &lt;tag&gt;</code></td><td class="note">Pull and start serving one or more models, e.g. <code>koretex models add qwen3:14b gpt-oss:20b</code>. Live as soon as the download finishes. (Pulls from the public Ollama registry — see troubleshooting for custom models.)</td></tr>
           <tr><td><code>koretex models rm &lt;tag&gt;</code></td><td class="note">Stop serving and delete one or more models to free up disk.</td></tr>
-          <tr><td><code>koretex stop</code></td><td class="note">Pause serving (your banked points stay — downtime never deducts them).</td></tr>
-          <tr><td><code>koretex start</code></td><td class="note">Resume serving after a stop.</td></tr>
-          <tr><td><code>koretex pair</code></td><td class="note">Re-link this Mac to a wallet (opens Phantom in your browser). The installer does this once during setup — run it again only to move the node to a different wallet.</td></tr>
+          <tr><td><code>koretex stop</code> / <code>koretex start</code></td><td class="note">Pause / resume serving (banked points stay — downtime never deducts them).</td></tr>
+          <tr><td><code>koretex pair</code></td><td class="note">Re-link this machine to a wallet. Run again only to move the node to a different wallet.</td></tr>
         </table>
-        <p class="note" style="margin-top:12px">More models served = more demand you can earn from, plus a diversity bonus. Pick the highest <b>×pts</b> models your Mac can comfortably run.</p>
+        <p class="note" style="margin-top:12px">More models served = more demand you can earn from, plus a diversity bonus. Pick the highest <b>×pts</b> models your hardware can comfortably run.</p>
+      </div>
+
+      <div class="card">
+        <h3>Keep your node running</h3>
+        <p class="note" style="margin:4px 0 10px">By default the node runs under your login session, so it stops when you log out or close the terminal. To keep it serving 24/7:</p>
+        <table class="cmd-table">
+          <tr><td><b>macOS</b></td><td class="note">Already persistent — the launchd service auto-starts at login and respawns on crash. Nothing to do.</td></tr>
+          <tr><td><b>Linux / WSL</b></td><td class="note">Run <code>sudo loginctl enable-linger $USER</code> once — this keeps your <code>systemd --user</code> services running after you log out.</td></tr>
+          <tr><td><b>Windows / WSL — always-on</b></td><td class="note">WSL also shuts the Linux VM down when idle or on reboot. To survive that, create a Windows <b>Task Scheduler</b> task that runs <code>wsl -d Ubuntu -u root true</code> (or <code>wsl ~</code>) <b>At log on</b> / <b>At startup</b> — that boots the distro (and, with linger enabled, your node) automatically.</td></tr>
+        </table>
+        <p class="note" style="margin-top:10px">Bring it back manually anytime: <code>koretex start</code> (or <code>systemctl --user start koretex-ollama koretex-node-agent</code>).</p>
+      </div>
+
+      <div class="card">
+        <h3>Troubleshooting</h3>
+        <table class="cmd-table">
+          <tr><td><code>koretex: command not found</code></td><td class="note">The <code>koretex</code> wrapper isn't on your current shell's PATH yet. Open a <b>new</b> terminal, or run <code>export PATH="$HOME/.local/bin:$PATH"</code> now (older installs used <code>$HOME/.koretex/bin</code> — use that path if the file is there: <code>ls ~/.koretex/bin/koretex</code>). New terminals pick it up automatically.</td></tr>
+          <tr><td><code>'DISPATCHER=…' is not recognized</code> (Windows)</td><td class="note">You're in <b>PowerShell</b>. The installer is a Linux/bash script — run it inside <b>WSL2 Ubuntu</b> instead (see Windows setup above).</td></tr>
+          <tr><td>Node stops when I close the terminal</td><td class="note">Linger isn't enabled. Run <code>sudo loginctl enable-linger $USER</code>. On Windows/WSL also set up the Task Scheduler entry above so the WSL VM itself stays/comes back up.</td></tr>
+          <tr><td>Stuck at <code>2/5 Node.js…</code></td><td class="note">You need Node 20+. <code>curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sudo apt-get install -y nodejs</code>, then re-run the install command.</td></tr>
+          <tr><td><code>This engine needs 'zstd'</code> at 3/5</td><td class="note"><code>sudo apt-get install -y zstd</code> (or <code>dnf</code>/<code>pacman</code>), then re-run. Re-runs are safe.</td></tr>
+          <tr><td>It's slow / not using my GPU</td><td class="note">Check the engine is on the GPU, not CPU: while serving, <code>nvidia-smi</code> should list an <code>ollama</code> process. If a model is too big for your VRAM it falls back to CPU — pick a smaller model with <code>koretex models</code>.</td></tr>
+          <tr><td>"I already have the model in my Ollama"</td><td class="note">The node serves through its <b>own managed engine</b> (port 11435), separate from your personal Ollama (11434) and from a Windows Ollama. Add models with <code>koretex models add &lt;tag&gt;</code> (registry models only). A <b>custom</b> model isn't in the registry — copy its files into the managed engine's store, or recreate it there.</td></tr>
+          <tr><td>Install fails downloading <code>/agent.js</code> (404)</td><td class="note">Transient during a dispatcher redeploy. Wait a couple of minutes and re-run the install command.</td></tr>
+          <tr><td>Check what's happening</td><td class="note"><code>koretex status</code> · logs: <code>journalctl --user -u koretex-node-agent -f</code> (Linux/WSL) or <code>/tmp/koretex-agent.log</code> &amp; <code>/tmp/koretex-ollama.log</code>.</td></tr>
+        </table>
       </div>
     </section>
   </main>
