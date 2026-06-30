@@ -344,6 +344,133 @@ async function interactive(): Promise<void> {
   await addTags(picks);
 }
 
+interface DemandRow {
+  model: string; // lowercased model id (Ollama normalizes), match catalog case-insensitively
+  completionTokens: number; // network-wide tokens served in the window — the "demand" signal
+  nodes: number; // how many nodes currently serve it — the "supply" signal
+  creditsPerMTok: number;
+  pointsWeight: number;
+}
+
+/** Network demand per model over the last `days`. Used to pick what's most worth serving. */
+async function fetchDemand(days: number): Promise<DemandRow[]> {
+  try {
+    const r = await fetch(`${DISPATCHER}/models/demand?days=${days}`);
+    if (!r.ok) return [];
+    const j: any = await r.json();
+    return (j?.models ?? []) as DemandRow[];
+  } catch {
+    return [];
+  }
+}
+
+/** `koretex autoserve [--days N] [--dry-run]` — pick the highest-UNMET-demand model that fits this
+ *  machine and start serving it, no human input. "Unmet" = demand discounted by existing supply
+ *  (tokens ÷ nodes-already-serving), so we avoid piling onto a model that's already oversupplied and
+ *  instead serve where our capacity is most likely to win jobs. On a cold network (no demand yet)
+ *  this falls back to the best-paying model that fits. Idempotent: a no-op if the pick is already
+ *  installed. This is what the unattended install + the Hermes provider skill call. */
+export async function autoserve(argv: string[]): Promise<void> {
+  const days = Math.max(1, Math.min(90, Number(argv[argv.indexOf("--days") + 1]) || 7));
+  const dryRun = argv.includes("--dry-run");
+  const hw = hardware();
+  const [catalog, demand, installed] = await Promise.all([
+    fetchCatalog().catch(() => [] as CatalogRow[]),
+    fetchDemand(days),
+    installedModels(),
+  ]);
+
+  const fitting = catalog.filter((m) => fits(m, hw));
+  if (!fitting.length) {
+    stdout.write(
+      `\nNothing in the catalog fits this machine (${hw.accelGb}GB usable / ${hw.freeGb}GB free).\n` +
+        `Add one by hand with a smaller tag:  koretex models add <tag>\n\n`,
+    );
+    return;
+  }
+
+  const dMap = new Map(demand.map((d) => [d.model.toLowerCase(), d]));
+  // Unmet demand per node (tokens ÷ supply+1); tie-break by earnings (price × points weight), then
+  // prefer the smaller model (cheaper to run, faster to pull, leaves room for a 2nd).
+  const score = (m: CatalogRow) => {
+    const d = dMap.get(m.tag.toLowerCase());
+    const unmet = d ? d.completionTokens / (d.nodes + 1) : 0;
+    return { unmet, pay: m.creditsPerMTok * m.pointsWeight, size: m.sizeGb };
+  };
+  const ranked = [...fitting].sort((a, b) => {
+    const sa = score(a), sb = score(b);
+    return sb.unmet - sa.unmet || sb.pay - sa.pay || sa.size - sb.size;
+  });
+  const pick = ranked[0];
+  const d = dMap.get(pick.tag.toLowerCase());
+
+  stdout.write(`\nMachine:  ${hw.accelGb}GB usable (${hw.kind}) · ${hw.freeGb}GB free disk\n`);
+  stdout.write(
+    `Best fit: ${pick.name} (${pick.tag})\n` +
+      `          demand ${d?.completionTokens?.toLocaleString() ?? 0} tok/${days}d · ${d?.nodes ?? 0} node(s) serving · ` +
+      `${pays(pick)}\n`,
+  );
+  // Show the next couple of runners-up so the choice is legible / auditable.
+  ranked.slice(1, 3).forEach((m) => {
+    const dd = dMap.get(m.tag.toLowerCase());
+    stdout.write(`  runner-up: ${m.tag.padEnd(22)} demand ${dd?.completionTokens ?? 0} · ${dd?.nodes ?? 0} node(s) · ${pays(m)}\n`);
+  });
+
+  const have = new Set(installed.map((t) => t.toLowerCase()));
+  if (have.has(pick.tag.toLowerCase())) {
+    stdout.write(`\n✓ Already serving ${pick.tag}. Nothing to do.\n\n`);
+    return;
+  }
+  if (dryRun) {
+    stdout.write(`\n(dry run — would pull and serve ${pick.tag})\n\n`);
+    return;
+  }
+  if (await pull(pick.tag)) nudgeAgent();
+}
+
+/** `koretex recommend [--json]` — print the best model for this machine to CONSUME its own inference
+ *  from (distinct from what it SERVES). The machine serves a small model it can host; for its own
+ *  work it should route through the network to the most capable agentic model someone is serving.
+ *  Picks: the largest agentic/tool-capable catalog model with at least one node serving it; falls
+ *  back to any served model, then to a model this machine hosts locally (the always-free floor).
+ *  Used by the Hermes provider skill to set the agent's primary model + local fallback. */
+export async function recommend(argv: string[]): Promise<void> {
+  const jsonOut = argv.includes("--json");
+  const [catalog, demand, installed] = await Promise.all([
+    fetchCatalog().catch(() => [] as CatalogRow[]),
+    fetchDemand(30),
+    installedModels(),
+  ]);
+  const supply = new Map(demand.map((d) => [d.model.toLowerCase(), d.nodes]));
+  const served = (m: CatalogRow) => (supply.get(m.tag.toLowerCase()) ?? 0) > 0;
+  const agentic = (m: CatalogRow) => m.caps.some((c) => ["agentic", "tools", "reasoning", "code"].includes(c));
+  const byCapability = (a: CatalogRow, b: CatalogRow) => b.sizeGb - a.sizeGb; // bigger ≈ more capable
+
+  const consume =
+    catalog.filter((m) => served(m) && agentic(m)).sort(byCapability)[0] ??
+    catalog.filter((m) => served(m)).sort(byCapability)[0] ??
+    null;
+  // The model this machine hosts itself — the free, always-available fallback for the agent.
+  const local = installed[0] ?? null;
+
+  if (jsonOut) {
+    console.log(
+      JSON.stringify({
+        consume: consume?.tag ?? local ?? null, // what to point the agent at (network), else local
+        consumeName: consume?.name ?? null,
+        local, // local Ollama tag for the fallback provider (free)
+        engineUrl: ENGINE_URL,
+        dispatcher: DISPATCHER,
+        openaiBase: `${DISPATCHER}/v1`,
+      }),
+    );
+    return;
+  }
+  stdout.write(`\nRecommended for THIS machine's own inference (via the network):\n`);
+  stdout.write(consume ? `  primary:  ${consume.tag} (${consume.name})\n` : `  primary:  (none served on the network yet)\n`);
+  stdout.write(local ? `  fallback: ${local} (served locally — free, always available)\n\n` : `  fallback: (none — this machine isn't serving a model yet; run koretex autoserve)\n\n`);
+}
+
 /** Entry point for `koretex models [ls|add|rm] …`. */
 export async function manageModels(argv: string[]): Promise<void> {
   const [sub, ...rest] = argv;

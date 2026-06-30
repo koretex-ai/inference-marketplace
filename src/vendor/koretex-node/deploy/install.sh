@@ -348,6 +348,12 @@ if [ -n "${KORETEX_TOKEN:-}" ]; then
   printf '{"token":"%s","address":"%s"}\n' "$KORETEX_TOKEN" "${KORETEX_WALLET:-}" > "$KDIR/node.json"
   chmod 600 "$KDIR/node.json"
   echo "  Linked via your website wallet connection."
+elif [ "${KORETEX_ENROLL:-0}" = "1" ] || [ ! -r /dev/tty ]; then
+  # Headless (no terminal to drive Phantom, e.g. piped installs or the Hermes provider skill):
+  # self-custody enroll. Generates a local wallet and mints the node token + a customer key for
+  # this machine's OWN inference, no human in the loop. The secret stays in ~/.koretex/wallet.json.
+  echo "  No interactive terminal — linking headless with a self-custody wallet…"
+  DISPATCHER_URL="$WS_DISPATCHER" ENGINE_URL="$ENGINE_URL" KORETEX_DISPATCHER="$DISPATCHER" node "$AGENT" enroll
 else
   DISPATCHER_URL="$WS_DISPATCHER" ENGINE_URL="$ENGINE_URL" node "$AGENT" pair
 fi
@@ -355,6 +361,13 @@ fi
 # 5. Auto-start on login --------------------------------------------------------
 bold "5/5  Enabling auto-start…"
 start_agent_service
+
+# Optional: let the agent pick the best-fitting, highest-demand model itself (used by unattended
+# installs / the Hermes provider skill). Runs after the service is up so the pull registers live.
+if [ "${KORETEX_AUTOSERVE:-0}" = "1" ]; then
+  echo "  Auto-selecting the best model to serve…"
+  ENGINE_URL="$ENGINE_URL" KORETEX_DISPATCHER="$DISPATCHER" node "$AGENT" autoserve || true
+fi
 
 # Install a `koretex` convenience command on PATH. Prefer a system bin that's already on PATH;
 # otherwise ~/.local/bin (login shells add it automatically when it exists) + wire the rc files.
