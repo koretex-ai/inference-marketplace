@@ -104,6 +104,11 @@
   .ok{background:rgba(31,181,122,.14);border:1px solid rgba(31,181,122,.3)}
   .err{background:rgba(210,59,59,.12);border:1px solid rgba(210,59,59,.28)}
   .info{background:rgba(58,123,240,.10);border:1px solid rgba(106,75,224,.22)}
+  /* `.info` is also the inline ⓘ-tooltip class (a 15px circle). When it's a status MESSAGE
+     (.msg.info), override the tooltip geometry back to a normal full-width block. */
+  .msg.info{display:block;width:auto;height:auto;margin-left:0;border-radius:12px;color:var(--ink);
+    font:400 14px/1.45 var(--sans);cursor:default;vertical-align:baseline;
+    background:rgba(58,123,240,.10);border:1px solid rgba(106,75,224,.22)}
   .note{color:var(--soft);font-size:13px;margin-top:14px}
   .tier{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:980px;border:1px solid currentColor}
   .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:7px;vertical-align:middle;background:var(--green)}
@@ -270,9 +275,9 @@
           <label for="cr_amount">Amount (USD)</label>
           <input id="cr_amount" type="number" min="0" step="0.01" value="10" inputmode="decimal" />
           <div class="preview" id="cr_preview"></div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap">
-            <button class="btn btn-grad" id="cr_buy">Pay with crypto</button>
-            <button class="btn btn-ghost hidden" id="cr_buy_card">Pay with card</button>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
+            <button class="btn btn-grad hidden" id="cr_buy_card">Pay with card</button>
+            <button class="btn btn-ghost" id="cr_buy">Pay with crypto</button>
           </div>
           <div id="cr_buyout"></div>
         </div>
@@ -878,7 +883,9 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
       $("crGate").classList.add("hidden"); $("crBody").classList.remove("hidden");
       $("cr_who").textContent = address;
       $("cr_balance").textContent = "…"; $("crOut").innerHTML = "";
-      try { await Credits.ensureCfg(); Credits.renderPreview(); $("cr_buy_card").classList.toggle("hidden", !Credits.cfg.stripeEnabled); } catch {}
+      // Card is the primary (gradient) button when Stripe is on; if it's off, hide it and promote
+      // the crypto button to primary so there's always one prominent action.
+      try { await Credits.ensureCfg(); Credits.renderPreview(); const se = !!Credits.cfg.stripeEnabled; $("cr_buy_card").classList.toggle("hidden", !se); $("cr_buy").className = se ? "btn btn-ghost" : "btn btn-grad"; } catch {}
       // Load the balance immediately (fast DB read). interactive=true opens a session on first use
       // (one signature, seamless with the embedded wallet) and caches it, so it shows by default.
       try { await Credits.loadBalance(true); }
