@@ -19,11 +19,13 @@ fi
 
 kx status || true
 echo
-echo "Earnings + balance: $DISPATCHER/dashboard  (connect the same wallet shown above)"
+echo "Credit balance (signed query for this machine's wallet):"
+kx balance 2>/dev/null || echo "  (balance unavailable — update the node agent: re-run the installer)"
+echo
+echo "Dashboard: $DISPATCHER/dashboard"
 
-# Best-effort balance via the customer key (the spend side). The /credits/balance endpoint takes a
-# signed request from the browser; for a quick local read we just surface the wallet + dashboard.
 ADDR="$(node -e 'try{console.log(require(process.env.HOME+"/.koretex/customer.json").address||"")}catch{console.log("")}')"
+BAL="$(kx balance --json 2>/dev/null || echo '{}')"
 echo "===KORETEX-JSON==="
-node -e 'console.log(JSON.stringify({address: process.argv[1]||null, dashboard: process.argv[2]+"/dashboard"}, null, 2))' "$ADDR" "$DISPATCHER"
+node -e 'const b=JSON.parse(process.argv[3]||"{}");console.log(JSON.stringify({address: process.argv[1]||b.address||null, balanceCredits: b.balance ?? null, balanceUsd: b.usd ?? null, dashboard: process.argv[2]+"/dashboard"}, null, 2))' "$ADDR" "$DISPATCHER" "$BAL"
 echo "===KORETEX-JSON==="
