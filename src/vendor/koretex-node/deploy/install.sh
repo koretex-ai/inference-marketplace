@@ -277,7 +277,10 @@ RestartSec=3
   if [ -n "$SUDO_OK" ]; then
     printf '%s\n[Install]\nWantedBy=multi-user.target\n' "$unit" | $SUDO tee "/etc/systemd/system/$name.service" >/dev/null
     $SUDO systemctl daemon-reload 2>/dev/null || true
-    $SUDO systemctl enable --now "$name.service" >/dev/null 2>&1 \
+    $SUDO systemctl enable "$name.service" >/dev/null 2>&1 || true
+    # restart (not `enable --now`) so a RE-install actually reloads the new unit/agent/node.json
+    # on an already-running service — `--now` is a no-op when the unit is already active.
+    $SUDO systemctl restart "$name.service" >/dev/null 2>&1 \
       || echo "    (couldn't start $name — check: sudo systemctl status $name)"
   else
     # No way to elevate → --user unit (needs linger; the final message tells the user).
@@ -285,7 +288,8 @@ RestartSec=3
     printf '%s\n[Install]\nWantedBy=default.target\n' "$unit" | grep -v '^User=' > "$dir/$name.service"
     loginctl enable-linger "$USER" 2>/dev/null || true
     systemctl --user daemon-reload 2>/dev/null || true
-    systemctl --user enable --now "$name.service" 2>/dev/null \
+    systemctl --user enable "$name.service" 2>/dev/null || true
+    systemctl --user restart "$name.service" 2>/dev/null \
       || echo "    (couldn't start $name via systemd --user — see Run-a-node troubleshooting)"
   fi
 }
