@@ -108,7 +108,7 @@ if ! command -v node >/dev/null 2>&1; then
     echo ""
     echo "  Then re-run:"
     if [ -n "${KORETEX_TOKEN:-}" ]; then
-      echo "    curl -fsSL $DISPATCHER/install | KORETEX_TOKEN=$KORETEX_TOKEN bash"
+      echo "    curl -fsSL $DISPATCHER/install | KORETEX_TOKEN=$KORETEX_TOKEN${KORETEX_WALLET:+ KORETEX_WALLET=$KORETEX_WALLET} bash"
     else
       echo "    curl -fsSL $DISPATCHER/install | bash"
     fi
