@@ -490,27 +490,31 @@
       <div class="card">
         <h3>2 · Set up your platform</h3>
 
-        <h4 style="margin:14px 0 4px"> macOS (Apple Silicon)</h4>
-        <p class="note">Open <b>Terminal</b> and paste the command above. That's it — it installs everything (engine, model, auto-start via launchd) and links your wallet.</p>
-
-        <h4 style="margin:18px 0 4px"> Windows (NVIDIA GPU) — via WSL2</h4>
-        <p class="note">The node runs inside WSL2 (a real Linux environment that uses your NVIDIA GPU). Do <b>not</b> run it in PowerShell — that's why <code>DISPATCHER=… is not recognized</code> appears.</p>
+        <h4 style="margin:14px 0 4px">🍎 macOS (Apple Silicon)</h4>
         <ol style="padding-left:1.1rem;margin-top:6px;color:var(--ink)" class="note">
-          <li>In an <b>admin PowerShell</b>: <code>wsl --install</code>, reboot, finish Ubuntu setup (pick a username/password).</li>
-          <li>Enable systemd (so the node stays up): in <b>Ubuntu</b> run<div class="codeblock"><code>printf '[boot]\nsystemd=true\n' | sudo tee /etc/wsl.conf</code></div>then in PowerShell <code>wsl --shutdown</code> and reopen Ubuntu.</li>
-          <li>Confirm the GPU is visible: <code>nvidia-smi</code> (should list your card — no driver install needed inside WSL).</li>
-          <li>Install prerequisites:<div class="codeblock"><code>sudo apt-get update &amp;&amp; sudo apt-get install -y zstd
+          <li>Open <b>Terminal</b> (press ⌘-Space, type "Terminal", Enter).</li>
+          <li>Paste the command from step 1 above and press Enter.</li>
+        </ol>
+        <p class="note">It installs everything (engine, model, auto-start via launchd — survives reboot) and links your wallet. If it stops asking for <b>Node.js</b>, install it once from <a href="https://nodejs.org" target="_blank" rel="noopener">nodejs.org</a> (macOS LTS .pkg) and re-run. Needs macOS 13+, 16GB+.</p>
+
+        <h4 style="margin:18px 0 4px">🪟 Windows + NVIDIA — via WSL2 (Ubuntu)</h4>
+        <p class="note">You'll run the node inside <b>WSL2</b>, a real Ubuntu Linux that uses your NVIDIA GPU. Do everything in the <b>Ubuntu</b> window — <b>not</b> PowerShell (PowerShell gives <code>'DISPATCHER=…' is not recognized</code>). First make sure your <b>NVIDIA driver is up to date</b> (from nvidia.com / GeForce Experience) — that's what exposes the GPU to WSL.</p>
+        <ol style="padding-left:1.1rem;margin-top:6px;color:var(--ink)" class="note">
+          <li><b>Open an admin terminal:</b> right-click the Start button → <b>Terminal (Admin)</b>.</li>
+          <li><b>Install Ubuntu:</b> <code>wsl --install</code>, then reboot. After reboot an Ubuntu window opens and asks you to create a username + password (used for <code>sudo</code>). If none opens, launch <b>Ubuntu</b> from the Start menu.</li>
+          <li><b>Turn on systemd</b> (keeps the node running) — in the <b>Ubuntu</b> window:<div class="codeblock"><code>printf '[boot]\nsystemd=true\n' | sudo tee /etc/wsl.conf</code></div>Then in PowerShell run <code>wsl --shutdown</code>, and reopen <b>Ubuntu</b> from the Start menu.</li>
+          <li><b>Check the GPU is visible</b> from Ubuntu: <code>nvidia-smi</code> should list your RTX card.</li>
+          <li><b>Install Node 20 + zstd:</b><div class="codeblock"><code>sudo apt-get update &amp;&amp; sudo apt-get install -y zstd
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sudo apt-get install -y nodejs</code></div></li>
-          <li>Paste the install command above into <b>Ubuntu</b> (not PowerShell).</li>
-          <li>Keep it running after you close the terminal: <code>sudo loginctl enable-linger $USER</code> (see "Keep your node running" below).</li>
+          <li><b>Paste your install command</b> (from step 1 above) into the <b>Ubuntu</b> window. It sets the node up as a system service that survives logout. (To survive a full Windows reboot too, see "Keep your node running" below.)</li>
         </ol>
 
-        <h4 style="margin:18px 0 4px"> Linux (NVIDIA GPU or CPU)</h4>
+        <h4 style="margin:18px 0 4px">🐧 Linux + NVIDIA (or CPU)</h4>
         <ol style="padding-left:1.1rem;margin-top:6px;color:var(--ink)" class="note">
-          <li>Install prerequisites:<div class="codeblock"><code>sudo apt-get update &amp;&amp; sudo apt-get install -y zstd
+          <li>Make sure your NVIDIA driver is installed (<code>nvidia-smi</code> works).</li>
+          <li>Install Node 20 + zstd:<div class="codeblock"><code>sudo apt-get update &amp;&amp; sudo apt-get install -y zstd
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sudo apt-get install -y nodejs</code></div>(RHEL/Fedora: <code>sudo dnf install -y zstd nodejs</code> · Arch: <code>sudo pacman -S zstd nodejs</code> — Node must be 20+.)</li>
-          <li>For an NVIDIA GPU, make sure the driver is installed (<code>nvidia-smi</code> works).</li>
-          <li>Paste the install command above, then run <code>sudo loginctl enable-linger $USER</code> to keep it running after logout.</li>
+          <li>Paste the install command from step 1. It installs as a systemd system service (survives logout/reboot) — nothing else to do.</li>
         </ol>
       </div>
 
