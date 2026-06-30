@@ -33,6 +33,7 @@ import { InMemoryModelPricing, type ModelPricingStore } from "../shared/model-pr
 import { PostgresModelPricing } from "../shared/model-pricing-postgres.js";
 import { Pricing, type PriceBook } from "../shared/pricing.js";
 import { SolanaVerifier, USDC_MINT_MAINNET } from "../shared/solana.js";
+import { StripePayments } from "../shared/stripe.js";
 import { Pairing } from "./pairing.js";
 import { Challenges } from "./challenge.js";
 import { Sessions } from "./sessions.js";
@@ -89,6 +90,13 @@ const CREDITS_PER_USDC = Number(process.env.CREDITS_PER_USDC ?? 10000);
 const WELCOME_CREDITS = Number(process.env.WELCOME_CREDITS ?? 1000);
 // Commitment used when reading deposits. 'finalized' (default) cannot roll back; 'confirmed' is faster.
 const SOLANA_COMMITMENT = process.env.SOLANA_COMMITMENT ?? "finalized";
+// Stripe (card) money-in — the fiat alternative to USDC. Optional: unset = card purchases are off
+// (only the crypto flow shows). STRIPE_SECRET_KEY signs the Checkout API; STRIPE_WEBHOOK_SECRET
+// verifies the completion webhook. Credits land in the same wallet balance at the same peg.
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY ?? "";
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET ?? "";
+// Max USD per card top-up — a sanity ceiling on the Checkout amount.
+const STRIPE_MAX_USD = Number(process.env.STRIPE_MAX_USD ?? 10000);
 // JSON-RPC methods the browser may proxy through us (so the Helius key stays server-side).
 const RPC_PROXY_METHODS = new Set([
   "getLatestBlockhash", "getAccountInfo", "getMultipleAccounts", "getTokenAccountBalance",
@@ -201,6 +209,9 @@ const verifier = new SolanaVerifier({
   usdcMint: USDC_MINT,
   commitment: SOLANA_COMMITMENT,
 });
+
+// Card money-in (optional, mirrors the verifier seam). Disabled when STRIPE_SECRET_KEY is unset.
+const stripe = new StripePayments({ secretKey: STRIPE_SECRET_KEY, webhookSecret: STRIPE_WEBHOOK_SECRET });
 
 // Wallet-bound customer API keys (metered inference). Durable when DATABASE_URL is set.
 const customerStore: CustomerStore = process.env.DATABASE_URL
@@ -1277,6 +1288,7 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
       usdcMint: USDC_MINT,
       creditsPerUsdc: CREDITS_PER_USDC,
       rpc: "/solana/rpc",
+      stripeEnabled: stripe.isEnabled(),
     });
   }
   // Fast path: the customer just sent USDC and hands us the tx signature. We verify it on-chain
@@ -1302,6 +1314,60 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
       });
       const balance = await creditStore.balance(pubkey);
       return json(res, 200, { credited, alreadyRecorded: !credited, credits, usdc: v.usdcRaw / 1e6, balance });
+    });
+  }
+  // Card money-in (Stripe). The buy page asks for a hosted Checkout URL and redirects there.
+  // Wallet-gated so we know which wallet to credit; the credit itself happens later in the webhook
+  // (the payment's outcome, not the browser's claim, is the proof). Same peg as the USDC path.
+  if (req.method === "POST" && url.pathname === "/credits/stripe/checkout") {
+    return readJson(req, res, async (b) => {
+      if (!stripe.isEnabled())
+        return json(res, 400, { error: { message: "card payments are not enabled" } });
+      const pubkey = authCreditsWallet(res, b);
+      if (!pubkey) return;
+      const usd = Number(b.amountUsd);
+      if (!(usd > 0))
+        return json(res, 400, { error: { message: "enter an amount greater than 0" } });
+      if (usd > STRIPE_MAX_USD)
+        return json(res, 400, { error: { message: `amount exceeds the $${STRIPE_MAX_USD} card limit` } });
+      // Where Stripe returns the customer: honour the proxy's forwarded scheme/host.
+      const proto = String(req.headers["x-forwarded-proto"] ?? "https").split(",")[0].trim();
+      const host = String(req.headers["x-forwarded-host"] ?? req.headers.host ?? "");
+      if (!host) return json(res, 400, { error: { message: "cannot determine site origin" } });
+      const checkoutUrl = await stripe.createCheckoutSession({ wallet: pubkey, usd, origin: `${proto}://${host}` });
+      return json(res, 200, { url: checkoutUrl });
+    });
+  }
+  // Stripe webhook: the payment's source of truth. Verify the signature over the RAW body (so a
+  // forged "you got paid" can't credit anyone), then on checkout.session.completed credit the
+  // wallet from metadata — idempotently, keyed on "stripe:<session id>" via the same CreditStore.
+  if (req.method === "POST" && url.pathname === "/credits/stripe/webhook") {
+    return readRaw(req, res, async (raw) => {
+      if (!stripe.isEnabled()) return json(res, 400, { error: { message: "card payments are not enabled" } });
+      const sig = String(req.headers["stripe-signature"] ?? "");
+      let event;
+      try {
+        event = stripe.constructEvent(raw, sig);
+      } catch (e: any) {
+        return json(res, 400, { error: { message: `webhook signature verification failed: ${e?.message ?? e}` } });
+      }
+      if (event.type === "checkout.session.completed") {
+        const session = event.data.object as any;
+        const wallet = String(session?.metadata?.wallet ?? session?.client_reference_id ?? "");
+        const amountTotal = Number(session?.amount_total ?? 0); // cents
+        // Only credit a paid session attributable to a valid wallet.
+        if (session?.payment_status === "paid" && isValidSolanaAddress(wallet) && amountTotal > 0) {
+          const usdcRaw = amountTotal * 1e4; // cents → USDC base units (6 decimals)
+          const credits = creditsFor(usdcRaw);
+          if (credits > 0) {
+            await creditStore.recordPurchase({
+              signature: "stripe:" + String(session.id), wallet, usdcRaw, credits, slot: 0, blockTime: null, at: Date.now(),
+            });
+          }
+        }
+      }
+      // Always 200 so Stripe stops retrying; unrelated events are intentionally ignored.
+      return json(res, 200, { received: true });
     });
   }
   // Backstop: re-scan the fee wallet's recent USDC deposits and credit any of THIS wallet's that
@@ -1591,6 +1657,22 @@ function readJson(
       return json(res, 400, { error: { message: "invalid json" } });
     }
     Promise.resolve(cb(parsed)).catch((e) =>
+      json(res, 500, { error: { message: String(e?.message ?? e) } }),
+    );
+  });
+}
+
+// Like readJson but hands the handler the UNPARSED body — needed for Stripe webhook signature
+// verification, which must run over the exact bytes Stripe signed (any re-serialization breaks it).
+function readRaw(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  cb: (raw: string) => unknown,
+) {
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", () => {
+    Promise.resolve(cb(body)).catch((e) =>
       json(res, 500, { error: { message: String(e?.message ?? e) } }),
     );
   });

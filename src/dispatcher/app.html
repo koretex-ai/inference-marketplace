@@ -270,7 +270,10 @@
           <label for="cr_amount">Amount (USD)</label>
           <input id="cr_amount" type="number" min="0" step="0.01" value="10" inputmode="decimal" />
           <div class="preview" id="cr_preview"></div>
-          <button class="btn btn-grad" id="cr_buy">Add credits</button>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn btn-grad" id="cr_buy">Pay with crypto</button>
+            <button class="btn btn-ghost hidden" id="cr_buy_card">Pay with card</button>
+          </div>
           <div id="cr_buyout"></div>
         </div>
 
@@ -868,18 +871,20 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
       $("cr_balance").textContent = fmt(Credits.state.balance);
       const tb = document.querySelector("#cr_history tbody");
       const rows = Credits.state.purchases || [];
-      tb.innerHTML = rows.length ? rows.map((p) => { const sig = p.signature; const short = sig.slice(0, 6) + "…" + sig.slice(-6); return `<tr><td>${new Date(p.at).toLocaleString()}</td><td class="num">$${(p.usdcRaw / 1e6).toFixed(2)}</td><td class="num">${fmt(p.credits)}</td><td><a href="https://solscan.io/tx/${sig}" target="_blank" rel="noopener" class="mono">${short}</a></td></tr>`; }).join("") : `<tr><td colspan="4" style="color:var(--soft)">No purchases yet.</td></tr>`;
+      tb.innerHTML = rows.length ? rows.map((p) => { const sig = p.signature; const receipt = sig.indexOf("stripe:") === 0 ? `<span class="note">Card</span>` : `<a href="https://solscan.io/tx/${sig}" target="_blank" rel="noopener" class="mono">${sig.slice(0, 6) + "…" + sig.slice(-6)}</a>`; return `<tr><td>${new Date(p.at).toLocaleString()}</td><td class="num">$${(p.usdcRaw / 1e6).toFixed(2)}</td><td class="num">${fmt(p.credits)}</td><td>${receipt}</td></tr>`; }).join("") : `<tr><td colspan="4" style="color:var(--soft)">No purchases yet.</td></tr>`;
     },
     async loadBalance(interactive = true) { const res = await Credits.gatedPost("/credits/balance", null, interactive); const d = await res.json(); if (!res.ok) throw new Error((d.error && d.error.message) || "Could not load balance."); Credits.renderBalance(d); },
     async open() {
       $("crGate").classList.add("hidden"); $("crBody").classList.remove("hidden");
       $("cr_who").textContent = address;
       $("cr_balance").textContent = "…"; $("crOut").innerHTML = "";
-      try { await Credits.ensureCfg(); Credits.renderPreview(); } catch {}
+      try { await Credits.ensureCfg(); Credits.renderPreview(); $("cr_buy_card").classList.toggle("hidden", !Credits.cfg.stripeEnabled); } catch {}
       // Load the balance immediately (fast DB read). interactive=true opens a session on first use
       // (one signature, seamless with the embedded wallet) and caches it, so it shows by default.
       try { await Credits.loadBalance(true); }
       catch (e) { $("cr_balance").textContent = "—"; if (e && e.needsAuth) show($("crOut"), "info", "Hit “Refresh” to load your balance."); else show($("crOut"), "err", (e && e.message) || String(e)); }
+      // If we just came back from Stripe Checkout, poll for the webhook-credited balance.
+      Credits.handleReturn();
     },
     // Fast: re-reads the balance + history from the DB. (Not the on-chain scan.)
     async refresh() {
@@ -929,12 +934,43 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
       } catch (e) { show($("cr_buyout"), "err", (e && e.message) || String(e)); }
       finally { btn.disabled = false; }
     },
+    // Card path: open a Stripe-hosted Checkout for the entered USD amount and redirect to it. The
+    // wallet is credited later by the webhook; on return we poll the balance (see handleReturn).
+    async buyCard() {
+      const usd = parseFloat($("cr_amount").value);
+      if (!(usd > 0)) return show($("cr_buyout"), "err", "Enter an amount greater than 0.");
+      const btn = $("cr_buy_card"); btn.disabled = true;
+      try {
+        show($("cr_buyout"), "info", "Redirecting to secure card checkout…");
+        const res = await Credits.gatedPost("/credits/stripe/checkout", { amountUsd: usd }, true);
+        const d = await res.json();
+        if (!res.ok || !d.url) throw new Error((d.error && d.error.message) || "Could not start card checkout.");
+        window.location.href = d.url;
+      } catch (e) { btn.disabled = false; show($("cr_buyout"), "err", (e && e.message) || String(e)); }
+    },
+    // After returning from Stripe (?stripe=success), the webhook usually credits within ~1–2s.
+    // Poll the balance a few times so the new credits appear, then strip the query param.
+    async handleReturn() {
+      const m = /[?&]stripe=(success|cancel)/.exec(location.hash) || /[?&]stripe=(success|cancel)/.exec(location.search);
+      if (!m) return;
+      try { history.replaceState(null, "", location.pathname + location.hash.replace(/[?&]stripe=(success|cancel)/, "")); } catch {}
+      if (m[1] === "cancel") return show($("cr_buyout"), "info", "Card payment canceled — no charge was made.");
+      show($("cr_buyout"), "info", "Finishing your card payment…");
+      const before = Credits.state.balance;
+      for (let i = 0; i < 8; i++) {
+        await sleep(1500);
+        try { await Credits.loadBalance(true); } catch {}
+        if (Credits.state.balance > before) return show($("cr_buyout"), "ok", "Card payment complete — credits added.");
+      }
+      show($("cr_buyout"), "info", "Payment received — if your balance hasn't updated, hit “Refresh” in a moment.");
+    },
     reset() { Credits.clearSession(); $("crBody").classList.add("hidden"); $("crGate").classList.remove("hidden"); $("crOut").innerHTML = ""; },
   };
   $("cr_amount").addEventListener("input", () => Credits.renderPreview());
   $("cr_refresh").addEventListener("click", () => Credits.refresh());
   $("cr_scan").addEventListener("click", (e) => Credits.scanDeposits(e));
   $("cr_buy").addEventListener("click", () => Credits.buy());
+  $("cr_buy_card").addEventListener("click", () => Credits.buyCard());
 
   // ===================================================================== PLAYGROUND
   const Play = {
