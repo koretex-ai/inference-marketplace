@@ -5,9 +5,9 @@
   "type": "module",
   "description": "OpenRouter-style inference marketplace backed by a fleet of rented Macs (Apple Silicon first-class). Dispatcher + node-agent.",
   "scripts": {
-    "prestart": "npm run wallet:bundle",
+    "prestart": "npm run bundle && npm run wallet:bundle",
     "start": "tsx src/dispatcher/index.ts",
-    "predispatcher": "npm run wallet:bundle",
+    "predispatcher": "npm run bundle && npm run wallet:bundle",
     "dispatcher": "tsx src/dispatcher/index.ts",
     "agent": "tsx src/vendor/koretex-node/src/node-agent/cli.ts",
     "pair": "tsx src/vendor/koretex-node/src/node-agent/cli.ts pair",
