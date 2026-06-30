@@ -73,6 +73,8 @@ case "$OS" in
       *) echo "Unsupported Linux architecture: $ARCH"; exit 1 ;;
     esac
     OLLAMA_BIN="$OLLAMA_DIR/bin/ollama"; ENGINE_LIB_KEY="LD_LIBRARY_PATH"; ENGINE_LIB_DIR="$OLLAMA_DIR/lib/ollama"
+    # WSL2 keeps the CUDA driver libs here — without it the engine can't see the GPU.
+    [ -d /usr/lib/wsl/lib ] && ENGINE_LIB_DIR="$ENGINE_LIB_DIR:/usr/lib/wsl/lib"
     ;;
   *)
     echo "Unsupported OS '$OS'. On Windows, install WSL2 (Ubuntu) and run this installer inside it."
@@ -169,11 +171,24 @@ elif [ "$ACCEL_GB" -ge 32 ]; then CTX_LEN=32768
 else CTX_LEN=16384
 fi
 
-# Run the managed engine + agent as auto-restart services — launchd on macOS, systemd --user on Linux.
+# Run the managed engine + agent as auto-restart services — launchd on macOS, systemd on Linux.
+# On Linux we prefer a SYSTEM service (managed by PID 1): rock-solid on WSL and headless boxes,
+# with none of the `systemctl --user` fragility (logind session / dbus-user-session / linger /
+# XDG_RUNTIME_DIR). It runs as the installing user so it still reaches ~/.koretex and the engine.
 NODE_BIN="$(command -v node)"
 NODE_PATH_DIR="$(dirname "$NODE_BIN")"
 AGENT_LABEL="com.koretex.node-agent"
 OLLAMA_LABEL="com.koretex.ollama"
+
+# Can we install a system service? "" if root, "sudo" if we can elevate (prompts on the tty), else
+# empty → fall back to a --user service. SUDO_OK marks that a system service is possible.
+SUDO=""; SUDO_OK=""
+if [ "$OS" != "Darwin" ]; then
+  if [ "$(id -u)" = 0 ]; then SUDO_OK=1
+  elif sudo -n true 2>/dev/null; then SUDO="sudo"; SUDO_OK=1
+  elif command -v sudo >/dev/null 2>&1 && [ -r /dev/tty ]; then SUDO="sudo"; SUDO_OK=1
+  fi
+fi
 
 start_engine_service() {
   if [ "$OS" = "Darwin" ]; then
@@ -228,7 +243,7 @@ PLIST
       "$NODE_BIN $AGENT" \
       "DISPATCHER_URL=$WS_DISPATCHER" "ENGINE_URL=$ENGINE_URL" \
       "KORETEX_BACKEND=${KORETEX_BACKEND:-$BACKEND_DEFAULT}" \
-      "PATH=$NODE_PATH_DIR:/usr/local/bin:/usr/bin:/bin"
+      "PATH=$NODE_PATH_DIR:/usr/local/bin:/usr/bin:/bin:/usr/lib/wsl/lib"
   fi
 }
 
@@ -241,22 +256,38 @@ launchd_load() {
   launchctl enable "$dom/$label" 2>/dev/null || true
 }
 
-# systemd --user: write a unit, reload, enable+start. Linger lets it run without an active login.
+# systemd: prefer a SYSTEM unit (runs under PID 1 as the installing user — robust on WSL/headless);
+# fall back to a --user unit (+linger) only when we can't elevate.
 systemd_unit() {
   local name="$1" desc="$2" exec="$3"; shift 3
-  local dir="$HOME/.config/systemd/user"; mkdir -p "$dir"
-  { echo "[Unit]"; echo "Description=$desc"; echo "After=network-online.target"
-    echo ""; echo "[Service]"
-    for env in "$@"; do echo "Environment=\"$env\""; done
-    echo "ExecStart=$exec"; echo "Restart=always"; echo "RestartSec=3"
-    echo ""; echo "[Install]"; echo "WantedBy=default.target"
-  } > "$dir/$name.service"
-  # Linger keeps user services running after logout. Best-effort here (a piped installer can't
-  # prompt for sudo); if it doesn't take, the final message tells the user the one command to run.
-  loginctl enable-linger "$USER" 2>/dev/null || sudo -n loginctl enable-linger "$USER" 2>/dev/null || true
-  systemctl --user daemon-reload 2>/dev/null || true
-  systemctl --user enable --now "$name.service" 2>/dev/null \
-    || echo "    (couldn't start $name via systemd --user — check: systemctl --user status $name)"
+  local unit="[Unit]
+Description=$desc
+After=network-online.target
+
+[Service]
+User=$USER
+"
+  local env
+  for env in "$@"; do unit="${unit}Environment=$env
+"; done
+  unit="${unit}ExecStart=$exec
+Restart=always
+RestartSec=3
+"
+  if [ -n "$SUDO_OK" ]; then
+    printf '%s\n[Install]\nWantedBy=multi-user.target\n' "$unit" | $SUDO tee "/etc/systemd/system/$name.service" >/dev/null
+    $SUDO systemctl daemon-reload 2>/dev/null || true
+    $SUDO systemctl enable --now "$name.service" >/dev/null 2>&1 \
+      || echo "    (couldn't start $name — check: sudo systemctl status $name)"
+  else
+    # No way to elevate → --user unit (needs linger; the final message tells the user).
+    local dir="$HOME/.config/systemd/user"; mkdir -p "$dir"
+    printf '%s\n[Install]\nWantedBy=default.target\n' "$unit" | grep -v '^User=' > "$dir/$name.service"
+    loginctl enable-linger "$USER" 2>/dev/null || true
+    systemctl --user daemon-reload 2>/dev/null || true
+    systemctl --user enable --now "$name.service" 2>/dev/null \
+      || echo "    (couldn't start $name via systemd --user — see Run-a-node troubleshooting)"
+  fi
 }
 
 start_engine_service
@@ -352,10 +383,14 @@ if [ "$NEEDS_PATH_HINT" = "1" ]; then
 fi
 if [ "$OS" != "Darwin" ]; then
   echo ""
-  echo "  IMPORTANT — keep the node running after you log out / close the terminal:"
-  echo "      sudo loginctl enable-linger \"$USER\""
-  echo "    Low-level control:  systemctl --user status|stop|start koretex-node-agent"
-  echo "    On WSL (Windows), also keep the distro alive — see the dashboard's \"Run a node\" → troubleshooting."
+  if [ -n "$SUDO_OK" ]; then
+    echo "  Auto-starts via a systemd system service — survives logout and reboot. ✓"
+    echo "    Low-level control:  sudo systemctl status|stop|start koretex-node-agent"
+  else
+    echo "  IMPORTANT — installed as a --user service (no sudo available). Keep it running after"
+    echo "  logout with:  sudo loginctl enable-linger \"$USER\"   ·  control:  systemctl --user status koretex-node-agent"
+  fi
+  echo "    On WSL (Windows), to survive a full reboot also auto-launch the distro — see the dashboard's \"Run a node\" → troubleshooting."
 fi
 echo "  Logs:  agent /tmp/koretex-agent.log · engine /tmp/koretex-ollama.log"
 [ "$OS" = "Linux" ] && echo "         (or: journalctl --user -u koretex-node-agent -f)"

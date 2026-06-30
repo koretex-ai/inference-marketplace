@@ -534,7 +534,7 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
         <p class="note" style="margin:4px 0 10px">By default the node runs under your login session, so it stops when you log out or close the terminal. To keep it serving 24/7:</p>
         <table class="cmd-table">
           <tr><td><b>macOS</b></td><td class="note">Already persistent — the launchd service auto-starts at login and respawns on crash. Nothing to do.</td></tr>
-          <tr><td><b>Linux / WSL</b></td><td class="note">Run <code>sudo loginctl enable-linger $USER</code> once — this keeps your <code>systemd --user</code> services running after you log out.</td></tr>
+          <tr><td><b>Linux / WSL</b></td><td class="note">Installs as a <b>systemd system service</b> (runs under PID 1 as your user) — already persistent across logout, no linger needed. Control: <code>sudo systemctl status|start|stop koretex-node-agent</code>. <i>(Older <code>--user</code> installs instead need <code>sudo loginctl enable-linger $USER</code>.)</i></td></tr>
           <tr><td><b>Windows / WSL — always-on</b></td><td class="note">WSL also shuts the Linux VM down when idle or on reboot. To survive that, create a Windows <b>Task Scheduler</b> task that runs <code>wsl -d Ubuntu -u root true</code> (or <code>wsl ~</code>) <b>At log on</b> / <b>At startup</b> — that boots the distro (and, with linger enabled, your node) automatically.</td></tr>
         </table>
         <p class="note" style="margin-top:10px">Bring it back manually anytime: <code>koretex start</code> (or <code>systemctl --user start koretex-ollama koretex-node-agent</code>).</p>

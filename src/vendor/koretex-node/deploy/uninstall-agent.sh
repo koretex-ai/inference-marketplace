@@ -15,10 +15,15 @@ if [ "$OS" = "Darwin" ]; then
   done
 else
   for unit in koretex-node-agent koretex-ollama; do
+    # system unit (current installs)
+    sudo systemctl disable --now "$unit.service" 2>/dev/null || true
+    sudo rm -f "/etc/systemd/system/$unit.service" 2>/dev/null || true
+    # --user unit (older / no-sudo installs)
     systemctl --user disable --now "$unit.service" 2>/dev/null || true
     rm -f "$HOME/.config/systemd/user/$unit.service"
     echo "Removed $unit"
   done
+  sudo systemctl daemon-reload 2>/dev/null || true
   systemctl --user daemon-reload 2>/dev/null || true
 fi
 

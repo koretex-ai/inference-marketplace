@@ -10,9 +10,14 @@ import { loadIdentity } from "./identity.js";
 
 const IS_MAC = os.platform() === "darwin";
 const LABEL = "com.koretex.node-agent"; // launchd label (macOS)
-const UNIT = "koretex-node-agent"; // systemd --user unit (Linux) — must match install.sh
+const UNIT = "koretex-node-agent"; // systemd unit (Linux) — must match install.sh
 const PLIST = path.join(os.homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
-const UNIT_FILE = path.join(os.homedir(), ".config", "systemd", "user", `${UNIT}.service`);
+// Linux installs prefer a SYSTEM unit (managed by PID 1); older/no-sudo installs use a --user unit.
+const SYS_UNIT_FILE = `/etc/systemd/system/${UNIT}.service`;
+const USER_UNIT_FILE = path.join(os.homedir(), ".config", "systemd", "user", `${UNIT}.service`);
+const isSystem = existsSync(SYS_UNIT_FILE); // which kind this machine has
+const SC = isSystem ? "sudo systemctl" : "systemctl --user"; // start/stop need root for system units
+const SC_RO = isSystem ? "systemctl" : "systemctl --user"; // read-only queries don't need sudo
 const ENGINE_URL = process.env.ENGINE_URL ?? "http://127.0.0.1:11434";
 const uid = () => (typeof process.getuid === "function" ? process.getuid() : 0);
 
@@ -26,21 +31,22 @@ function sh(cmd: string): boolean {
 }
 
 const isRunning = () =>
-  IS_MAC ? sh(`launchctl print gui/${uid()}/${LABEL}`) : sh(`systemctl --user is-active --quiet ${UNIT}`);
-const isInstalled = () => existsSync(IS_MAC ? PLIST : UNIT_FILE);
+  IS_MAC ? sh(`launchctl print gui/${uid()}/${LABEL}`) : sh(`${SC_RO} is-active --quiet ${UNIT}`);
+const isInstalled = () => existsSync(IS_MAC ? PLIST : SYS_UNIT_FILE) || (!IS_MAC && existsSync(USER_UNIT_FILE));
 
 export function stop(): void {
   if (!isRunning()) return console.log("Node is already stopped.");
   if (IS_MAC) sh(`launchctl bootout gui/${uid()}/${LABEL}`);
-  else sh(`systemctl --user stop ${UNIT}`);
+  else sh(`${SC} stop ${UNIT}`);
   console.log("⏸  Stopped serving. Run `koretex start` to resume.");
 }
 
 export function start(): void {
   if (!isInstalled()) return console.log("Node isn't installed. Re-run the installer first.");
   if (!IS_MAC) {
-    // systemd: restart is idempotent (starts if stopped, restarts if running).
-    if (sh(`systemctl --user restart ${UNIT}`)) console.log("▶️  Started — serving again.");
+    // systemd: restart is idempotent (starts if stopped, restarts if running). A system unit
+    // prompts for sudo here, which is fine from an interactive `koretex start`.
+    if (sh(`${SC} restart ${UNIT}`)) console.log("▶️  Started — serving again.");
     else console.log("Could not start the node. Re-run the installer.");
     return;
   }
