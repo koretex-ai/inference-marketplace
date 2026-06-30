@@ -10,12 +10,14 @@
 import { startAgent } from "./index.js";
 import { runPair } from "./pair.js";
 import { runEnroll } from "./enroll.js";
+import { runBalance } from "./balance.js";
 import { status, stop, start } from "./service.js";
 import { manageModels, autoserve, recommend } from "./models.js";
 
 switch (process.argv[2]) {
   case "pair": runPair(); break;
   case "enroll": runEnroll(); break;
+  case "balance": runBalance(); break;
   case "autoserve": autoserve(process.argv.slice(3)); break;
   case "recommend": recommend(process.argv.slice(3)); break;
   case "status": status(); break;

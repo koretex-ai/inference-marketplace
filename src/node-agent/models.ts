@@ -346,6 +346,7 @@ async function interactive(): Promise<void> {
 
 interface DemandRow {
   model: string; // lowercased model id (Ollama normalizes), match catalog case-insensitively
+  name: string; // friendly name (dispatcher joins the catalog; falls back to the id)
   completionTokens: number; // network-wide tokens served in the window — the "demand" signal
   nodes: number; // how many nodes currently serve it — the "supply" signal
   creditsPerMTok: number;
@@ -441,24 +442,25 @@ export async function recommend(argv: string[]): Promise<void> {
     fetchDemand(30),
     installedModels(),
   ]);
-  const supply = new Map(demand.map((d) => [d.model.toLowerCase(), d.nodes]));
-  const served = (m: CatalogRow) => (supply.get(m.tag.toLowerCase()) ?? 0) > 0;
-  const agentic = (m: CatalogRow) => m.caps.some((c) => ["agentic", "tools", "reasoning", "code"].includes(c));
-  const byCapability = (a: CatalogRow, b: CatalogRow) => b.sizeGb - a.sizeGb; // bigger ≈ more capable
-
-  const consume =
-    catalog.filter((m) => served(m) && agentic(m)).sort(byCapability)[0] ??
-    catalog.filter((m) => served(m)).sort(byCapability)[0] ??
-    null;
-  // The model this machine hosts itself — the free, always-available fallback for the agent.
+  // Consume = the most capable model ACTUALLY served on the network. We rank by points-weight
+  // (≈ model size / capability), drawn from the demand feed so it includes community models too
+  // (not just our catalog). Agent runtimes like Hermes need a big-context model, so bigger is the
+  // right default; we just skip vision/embedding models that can't drive an agent.
+  void catalog; // (kept for signature parity / future capability filtering)
+  const SKIP = /vl|vision|holo|moondream|embed|nomic|mxbai|bge|arctic-embed/i;
+  const consumeRow = demand
+    .filter((d) => d.nodes > 0 && !SKIP.test(d.model))
+    .sort((a, b) => b.pointsWeight - a.pointsWeight)[0];
+  const consume = consumeRow?.model ?? installed[0] ?? null;
+  // The model this machine hosts itself (info only — see note below on why it's not a Hermes fallback).
   const local = installed[0] ?? null;
 
   if (jsonOut) {
     console.log(
       JSON.stringify({
-        consume: consume?.tag ?? local ?? null, // what to point the agent at (network), else local
-        consumeName: consume?.name ?? null,
-        local, // local Ollama tag for the fallback provider (free)
+        consume, // what to point the agent at — the biggest model served on the network
+        consumeName: consumeRow?.name ?? consume ?? null,
+        local, // local Ollama tag (small-context — see SKILL.md fallback note)
         engineUrl: ENGINE_URL,
         dispatcher: DISPATCHER,
         openaiBase: `${DISPATCHER}/v1`,
@@ -466,9 +468,8 @@ export async function recommend(argv: string[]): Promise<void> {
     );
     return;
   }
-  stdout.write(`\nRecommended for THIS machine's own inference (via the network):\n`);
-  stdout.write(consume ? `  primary:  ${consume.tag} (${consume.name})\n` : `  primary:  (none served on the network yet)\n`);
-  stdout.write(local ? `  fallback: ${local} (served locally — free, always available)\n\n` : `  fallback: (none — this machine isn't serving a model yet; run koretex autoserve)\n\n`);
+  stdout.write(`\nRecommended model for THIS machine's own inference (via the network):\n`);
+  stdout.write(consume ? `  consume:  ${consume}${consumeRow ? ` (${consumeRow.nodes} node(s), ×${consumeRow.pointsWeight.toFixed(2)})` : " (local)"}\n\n` : `  (nothing served on the network yet — run koretex autoserve)\n\n`);
 }
 
 /** Entry point for `koretex models [ls|add|rm] …`. */
