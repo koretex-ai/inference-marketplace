@@ -9,8 +9,15 @@ import path from "node:path";
 import { loadIdentity } from "./identity.js";
 
 const IS_MAC = os.platform() === "darwin";
+const IS_WIN = os.platform() === "win32";
 const LABEL = "com.koretex.node-agent"; // launchd label (macOS)
 const UNIT = "koretex-node-agent"; // systemd unit (Linux) — must match install.sh
+// Windows: the agent runs under a Scheduled Task (or a Startup-folder fallback) set up by install.ps1.
+const WIN_TASK = "KoretexNodeAgent"; // Scheduled Task name — must match install.ps1
+const WIN_AGENT_CMD = path.join(os.homedir(), ".koretex", "agent-run.cmd");
+// Match the agent process regardless of how it was launched (task or startup folder).
+const WIN_PROC_FILTER =
+  "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -like '*koretex-agent*' }";
 const PLIST = path.join(os.homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
 // Linux installs prefer a SYSTEM unit (managed by PID 1); older/no-sudo installs use a --user unit.
 const SYS_UNIT_FILE = `/etc/systemd/system/${UNIT}.service`;
@@ -30,12 +37,40 @@ function sh(cmd: string): boolean {
   }
 }
 
+function shOut(cmd: string): string {
+  try {
+    return execSync(cmd, { stdio: ["ignore", "pipe", "ignore"] }).toString();
+  } catch {
+    return "";
+  }
+}
+
+const ps = (script: string) => `powershell -NoProfile -Command "${script}"`;
+const winTaskExists = () => sh(`schtasks /query /tn "${WIN_TASK}"`);
+const winTaskRunning = () => /(^|\n)\s*Status:\s+Running/i.test(shOut(`schtasks /query /tn "${WIN_TASK}" /fo LIST /v`));
+const winProcRunning = () => shOut(ps(`${WIN_PROC_FILTER} | Select-Object -First 1`)).trim().length > 0;
+
 const isRunning = () =>
-  IS_MAC ? sh(`launchctl print gui/${uid()}/${LABEL}`) : sh(`${SC_RO} is-active --quiet ${UNIT}`);
-const isInstalled = () => existsSync(IS_MAC ? PLIST : SYS_UNIT_FILE) || (!IS_MAC && existsSync(USER_UNIT_FILE));
+  IS_WIN
+    ? winTaskExists()
+      ? winTaskRunning()
+      : winProcRunning()
+    : IS_MAC
+      ? sh(`launchctl print gui/${uid()}/${LABEL}`)
+      : sh(`${SC_RO} is-active --quiet ${UNIT}`);
+const isInstalled = () =>
+  IS_WIN
+    ? winTaskExists() || existsSync(WIN_AGENT_CMD)
+    : existsSync(IS_MAC ? PLIST : SYS_UNIT_FILE) || (!IS_MAC && existsSync(USER_UNIT_FILE));
 
 export function stop(): void {
   if (!isRunning()) return console.log("Node is already stopped.");
+  if (IS_WIN) {
+    // End the scheduled-task instance if present; otherwise kill the matching agent process directly.
+    if (winTaskExists()) sh(`schtasks /end /tn "${WIN_TASK}"`);
+    else sh(ps(`${WIN_PROC_FILTER} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`));
+    return console.log("⏸  Stopped serving. Run `koretex start` to resume.");
+  }
   if (IS_MAC) sh(`launchctl bootout gui/${uid()}/${LABEL}`);
   else sh(`${SC} stop ${UNIT}`);
   console.log("⏸  Stopped serving. Run `koretex start` to resume.");
@@ -43,6 +78,15 @@ export function stop(): void {
 
 export function start(): void {
   if (!isInstalled()) return console.log("Node isn't installed. Re-run the installer first.");
+  if (IS_WIN) {
+    if (isRunning()) return console.log("▶️  Already serving.");
+    // Prefer the scheduled task; fall back to launching the baked launcher hidden.
+    const ok = winTaskExists()
+      ? sh(`schtasks /run /tn "${WIN_TASK}"`)
+      : sh(ps(`Start-Process -FilePath '${WIN_AGENT_CMD}' -WindowStyle Hidden`));
+    console.log(ok ? "▶️  Started — serving again." : "Could not start the node. Re-run the installer.");
+    return;
+  }
   if (!IS_MAC) {
     // systemd: restart is idempotent (starts if stopped, restarts if running). A system unit
     // prompts for sudo here, which is fine from an interactive `koretex start`.

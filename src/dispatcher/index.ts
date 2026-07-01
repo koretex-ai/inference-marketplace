@@ -379,6 +379,7 @@ function readMaybe(rel: string): string | null {
   }
 }
 const INSTALL_SH = readMaybe("../../src/vendor/koretex-node/deploy/install.sh");
+const INSTALL_PS1 = readMaybe("../../src/vendor/koretex-node/deploy/install.ps1"); // native Windows installer
 const PREFLIGHT_SH = readMaybe("../../src/vendor/koretex-node/deploy/preflight.sh");
 const AGENT_BUNDLE = readMaybe("../../dist/koretex-agent.cjs");
 // Browser bundle of the Phantom wallet wrapper (built via `npm run wallet:bundle`). Absent until
@@ -1517,6 +1518,10 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
   // One-command installer + its pieces (served same-origin; no extra hosting).
   if (req.method === "GET" && url.pathname === "/install") {
     return serveText(res, INSTALL_SH, "text/x-shellscript; charset=utf-8");
+  }
+  // Native Windows installer (PowerShell):  irm https://dispatcher.koretex.ai/install.ps1 | iex
+  if (req.method === "GET" && url.pathname === "/install.ps1") {
+    return serveText(res, INSTALL_PS1, "text/plain; charset=utf-8");
   }
   if (req.method === "GET" && url.pathname === "/preflight") {
     return serveText(res, PREFLIGHT_SH, "text/x-shellscript; charset=utf-8");
