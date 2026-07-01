@@ -909,17 +909,20 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
   function bootstrapKeypairSession() {
     try {
       const m = (location.hash || "").match(/kx=([A-Za-z0-9_\-]+)/);
-      if (!m) return;
+      if (!m) return false;
       const data = JSON.parse(atob(m[1].replace(/-/g, "+").replace(/_/g, "/")));
-      if (!data || !data.pubkey || !data.session) return;
+      if (!data || !data.pubkey || !data.session) return false;
       history.replaceState(null, "", location.pathname + "#dashboard");
-      Dash.keypairMode = true;
+      Dash.keypairMode = true;                 // from now on, ignore embedded-wallet setAddress
       Dash.session = data.session;
-      selectTab("dashboard", false);   // make the dashboard tab active so onWallet loads it
-      setAddress(data.pubkey);         // fires onWallet → Dash.load() → loadWithSession (guarded)
-    } catch (e) { console.error("keypair dashboard bootstrap failed", e); }
+      selectTab("dashboard", false);
+      setAddress(data.pubkey);                 // fires onWallet → Dash.load() → loadWithSession (guarded)
+      return true;
+    } catch (e) { console.error("keypair dashboard bootstrap failed", e); return false; }
   }
-  setTimeout(bootstrapKeypairSession, 0);
+  // Handle `koretex dashboard` opening the URL in a tab that already had the app loaded (only the
+  // hash changes, no reload) — re-run the adopt so the node keypair still wins.
+  window.addEventListener("hashchange", () => { if (/kx=/.test(location.hash)) bootstrapKeypairSession(); });
 
   // ===================================================================== CREDITS
   const Credits = {
@@ -1350,7 +1353,12 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
 
   // ---------------------------------------------------------------- boot
   (async () => {
-    W.onDisconnect(() => setAddress(null));
+    W.onDisconnect(() => { if (!Dash.keypairMode) setAddress(null); });
+    // Keypair dashboard (`koretex dashboard` → #kx=…) takes precedence over the embedded wallet's
+    // auto-restore: adopt it, and DON'T auto-connect the browser wallet (which would otherwise
+    // override the node's session with a cached Google/Phantom login).
+    const kp = bootstrapKeypairSession();
+    if (kp) return;
     // Restore the tab the user was on before a Google round-trip, else hash, else path.
     let initial = location.hash.slice(1);
     try { const rt = sessionStorage.getItem("kx_return_tab"); if (rt) { initial = rt; sessionStorage.removeItem("kx_return_tab"); } } catch {}
