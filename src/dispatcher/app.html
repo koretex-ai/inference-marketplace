@@ -227,6 +227,10 @@
   .langtabs button.active{background:var(--grn);color:#02040A;border-color:var(--grn)}
   .bubble.user{color:#02040A}
   .bubble.bot{background:var(--panel);color:var(--ink)}
+  /* sharp corners — cards, boxes, buttons, inputs, badges, modals (genuine circles/dots stay round) */
+  .brand .logo,.waddr,.btn,.seg,.menu,.tabs button,.card,.stat,input,select,textarea,.composer textarea,
+  .msg,.msg.info,.tier,.codeblock,.formula,.modal,.modal .badge,.info::after,.langtabs button,
+  .bubble,.bubble.user,.bubble.bot,button{border-radius:0}
 </style>
 </head>
 <body>
