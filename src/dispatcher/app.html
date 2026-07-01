@@ -853,7 +853,11 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
         const d = await res.json();
         if (!res.ok) throw new Error((d.error && d.error.message) || "Could not load stats.");
         Dash.render(d);
-        if (d.session) Dash.session = d.session;
+        if (d.session) {
+          Dash.session = d.session;
+          // Keep the credits/API-key session in sync with the (re-issued) dashboard session.
+          if (Dash.keypairMode) Credits.saveSession({ token: d.session, expiresAt: d.sessionExpiresAt || (Date.now() + 3600000) });
+        }
         Dash.startLive();
       } catch (e) { show($("dashOut"), "err", (e && e.message) || String(e)); }
     },
@@ -911,7 +915,7 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
     },
     reset() {
       if (Dash.pointsTimer) { clearInterval(Dash.pointsTimer); Dash.pointsTimer = null; }
-      Dash.session = null; Dash.keypairMode = false;
+      Dash.session = null; Dash.keypairMode = false; Credits.keypair = false;
       $("dashBody").classList.add("hidden"); $("dashGate").classList.remove("hidden"); $("dashOut").innerHTML = "";
     },
   };
@@ -932,6 +936,11 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
       Dash.session = data.session;
       selectTab("dashboard", false);
       setAddress(data.pubkey);                 // fires onWallet → Dash.load() → loadWithSession (guarded)
+      // Reuse the dashboard session for the credits + API-key actions too — the server accepts this
+      // session (same store) via authCreditsWallet, so a keypair user can mint keys and buy credits by
+      // card with NO browser Solana wallet.
+      Credits.keypair = true;
+      Credits.saveSession({ token: data.session, expiresAt: data.exp || (Date.now() + 3600000) });
       return true;
     } catch (e) { console.error("keypair dashboard bootstrap failed", e); return false; }
   }
@@ -941,7 +950,7 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
 
   // ===================================================================== CREDITS
   const Credits = {
-    cfg: null, conn: null, session: null,
+    cfg: null, conn: null, session: null, keypair: false,
     state: { balance: 0, purchases: [], keys: [] },
     sessKey: (a) => "koretex_sess_" + a,
     loadStored(a) { try { const s = JSON.parse(sessionStorage.getItem(Credits.sessKey(a)) || "null"); return (s && s.token && s.expiresAt > Date.now()) ? s : null; } catch { return null; } },
@@ -956,6 +965,9 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
       if (Credits.session && Credits.session.expiresAt > Date.now() + 5000) return Credits.session.token;
       const stored = Credits.loadStored(address);
       if (stored) { Credits.session = stored; return stored.token; }
+      // Keypair dashboard has no browser wallet to sign with — the session came from `koretex dashboard`.
+      // If it's gone/expired, tell them to reopen it rather than triggering a (failing) Solana signature.
+      if (Credits.keypair) throw Object.assign(new Error("Dashboard session expired — re-run `koretex dashboard` to reopen."), { needsAuth: true });
       if (!interactive) return null;
       const { nonce, signature } = await Credits.signCredits();
       const res = await fetch("/credits/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey: address, nonce, signature }) });
@@ -987,7 +999,19 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
       $("cr_balance").textContent = "…"; $("crOut").innerHTML = "";
       // Card is the primary (gradient) button when Stripe is on; if it's off, hide it and promote
       // the crypto button to primary so there's always one prominent action.
-      try { await Credits.ensureCfg(); Credits.renderPreview(); const se = !!Credits.cfg.stripeEnabled; $("cr_buy_card").classList.toggle("hidden", !se); $("cr_buy").className = se ? "btn btn-ghost" : "btn btn-grad"; } catch {}
+      try {
+        await Credits.ensureCfg(); Credits.renderPreview();
+        const se = !!Credits.cfg.stripeEnabled;
+        $("cr_buy_card").classList.toggle("hidden", !se);
+        if (Credits.keypair) {
+          // On-chain USDC needs a browser Solana wallet, which a keypair dashboard doesn't have — card only.
+          $("cr_buy").classList.add("hidden");
+          $("cr_buy_card").className = "btn btn-grad";
+        } else {
+          $("cr_buy").classList.remove("hidden");
+          $("cr_buy").className = se ? "btn btn-ghost" : "btn btn-grad";
+        }
+      } catch {}
       // Load the balance immediately (fast DB read). interactive=true opens a session on first use
       // (one signature, seamless with the embedded wallet) and caches it, so it shows by default.
       try { await Credits.loadBalance(true); }
@@ -1012,6 +1036,7 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
       finally { link.textContent = prev; }
     },
     async buy() {
+      if (Credits.keypair) return show($("cr_buyout"), "info", "On-chain USDC needs a browser wallet — use “Buy with card” instead.");
       const usd = parseFloat($("cr_amount").value);
       if (!(usd > 0)) return show($("cr_buyout"), "err", "Enter an amount greater than 0.");
       const btn = $("cr_buy"); btn.disabled = true;
