@@ -27,6 +27,19 @@
   .ok{ background:rgba(31,181,122,.14); border:1px solid rgba(31,181,122,.3); }
   .err{ background:rgba(210,59,59,.12); border:1px solid rgba(210,59,59,.28); }
   .addr{ font-family:var(--mono); word-break:break-all; }
+
+  /* ===== DARK THEME (koretex) — colour reskin only; layout/markup/JS unchanged ===== */
+  :root{ --bg:#02040A; --panel:rgba(4,10,8,.72); --panel2:#04100A;
+    --ink:#D7FFE7; --soft:#5D7D6C; --line:rgba(43,255,136,.16); --grn:#2BFF88;
+    --blue:#2BFF88; --violet:#13C46A; --cta1:#2BFF88; --cta2:#00FF6A; }
+  body{ background:var(--bg); }
+  #bgwash{ background:radial-gradient(120% 80% at 50% 0%, #06180E 0%, #02040A 55%); }
+  ::selection{ background:var(--grn); color:#02040A; }
+  .card{ background:var(--panel); }
+  button{ color:#02040A; box-shadow:0 6px 20px rgba(43,255,136,.28); }
+  button.sec{ background:transparent; color:var(--ink); border:1px solid var(--line); box-shadow:none; }
+  code{ background:rgba(43,255,136,.1); color:var(--grn); }
+  .err{ background:rgba(255,45,85,.12); border:1px solid rgba(255,45,85,.3); }
 </style>
 </head>
 <body>

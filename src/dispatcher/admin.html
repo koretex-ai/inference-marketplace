@@ -26,6 +26,16 @@
   .msg { margin-top: 1rem; padding: .8rem 1rem; border-radius: 10px; font-size: .92rem; }
   .err { background: color-mix(in srgb, #d23b3b 18%, transparent); }
   #panel { display: none; }
+
+  /* ===== DARK THEME (koretex) — colour reskin only; layout/markup/JS unchanged ===== */
+  :root { color-scheme: dark; }
+  body { background: #02040A; color: #D7FFE7; }
+  ::selection { background: #2BFF88; color: #02040A; }
+  a { color: #2BFF88; }
+  button { background: #2BFF88; color: #02040A; }
+  button:hover { box-shadow: 0 0 18px rgba(43,255,136,.4); }
+  .card { border: 1px solid rgba(43,255,136,.18); background: rgba(4,10,8,.5); }
+  .err { background: rgba(255,45,85,.14); }
 </style>
 </head>
 <body>
