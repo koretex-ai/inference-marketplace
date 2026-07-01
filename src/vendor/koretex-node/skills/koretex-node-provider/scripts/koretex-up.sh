@@ -78,14 +78,18 @@ if command -v hermes >/dev/null 2>&1; then
   CONSUME="$(node -e 'try{process.stdout.write((JSON.parse(process.argv[1]||"{}").consume)||"")}catch(e){}' "$REC_JSON")"
   OPENAI_BASE="$(node -e 'try{process.stdout.write((JSON.parse(process.argv[1]||"{}").openaiBase)||"")}catch(e){}' "$REC_JSON")"
   [ -z "$OPENAI_BASE" ] && OPENAI_BASE="$DISPATCHER/v1"
-  HERMES_DIR="$HOME/.hermes"
-  ENVF="$HERMES_DIR/.env"
+  # Resolve the env file Hermes ACTUALLY reads (varies by platform) instead of hardcoding it.
+  ENVF="$(hermes config env-path 2>/dev/null | head -1)"
+  if [ -z "$ENVF" ]; then HD="$HOME/.hermes"; ENVF="$HD/.env"; fi
+  mkdir -p "$(dirname "$ENVF")"
   if [ -n "$KEY" ] && [ -n "$CONSUME" ]; then
     grep -q '^KORETEX_API_KEY=' "$ENVF" 2>/dev/null || printf '\nKORETEX_API_KEY=%s\n' "$KEY" >> "$ENVF"
     hermes config set model.provider custom        >/dev/null 2>&1 || true
     hermes config set model.base_url "$OPENAI_BASE" >/dev/null 2>&1 || true
     hermes config set model.default "$CONSUME"      >/dev/null 2>&1 || true
     hermes config set model.api_key_env KORETEX_API_KEY >/dev/null 2>&1 || true
+    # Overwrite any stale literal api_key (Hermes prefers it over api_key_env) with THIS node's key.
+    hermes config set model.api_key "$KEY"          >/dev/null 2>&1 || true
     hermes config set model.context_length 65536    >/dev/null 2>&1 || true
     # Generous OUTPUT cap so reasoning models (which emit a long "thinking" block before the answer)
     # don't get truncated and stuck in Hermes's continuation loop. It's a ceiling, not a target.

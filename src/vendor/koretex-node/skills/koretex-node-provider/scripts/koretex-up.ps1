@@ -77,16 +77,21 @@ if (Get-Command hermes -ErrorAction SilentlyContinue) {
   $key = $null; if (Test-Path $customerPath) { try { $key = (Get-Content $customerPath -Raw | ConvertFrom-Json).key } catch {} }
   $consume = if ($rec) { $rec.consume } else { $null }
   if ($key -and $consume) {
-    $hermesDir = Join-Path $env:USERPROFILE ".hermes"
-    New-Item -ItemType Directory -Force -Path $hermesDir | Out-Null
-    $envFile = Join-Path $hermesDir ".env"
-    if (-not (Test-Path $envFile) -or -not (Select-String -Path $envFile -Pattern '^KORETEX_API_KEY=' -Quiet)) {
-      Add-Content -Path $envFile -Value "KORETEX_API_KEY=$key"
-    }
+    # Resolve the env file Hermes ACTUALLY reads. On Windows that's %LOCALAPPDATA%\hermes\.env, NOT
+    # ~/.hermes\.env — so ask Hermes rather than hardcoding. Fall back to ~/.hermes\.env if unavailable.
+    $envFile = $null
+    try { $envFile = (hermes config env-path 2>$null | Select-Object -First 1).Trim() } catch {}
+    if ([string]::IsNullOrWhiteSpace($envFile)) { $envFile = Join-Path (Join-Path $env:USERPROFILE ".hermes") ".env" }
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $envFile) | Out-Null
+    if (Test-Path $envFile) { (Get-Content $envFile) | Where-Object { $_ -notmatch '^KORETEX_API_KEY=' } | Set-Content $envFile }
+    Add-Content -Path $envFile -Value "KORETEX_API_KEY=$key"
     hermes config set model.provider custom        2>$null | Out-Null
     hermes config set model.base_url $openaiBase   2>$null | Out-Null
     hermes config set model.default $consume       2>$null | Out-Null
     hermes config set model.api_key_env KORETEX_API_KEY 2>$null | Out-Null
+    # Hermes prefers a LITERAL model.api_key over api_key_env, so a stale literal (e.g. from a prior
+    # Google-login setup) would keep spending the old wallet. Overwrite it with THIS node's spend key.
+    hermes config set model.api_key $key           2>$null | Out-Null
     hermes config set model.context_length 65536   2>$null | Out-Null
     # Generous OUTPUT cap so reasoning models don't get truncated and stuck in Hermes's continuation loop.
     hermes config set model.max_tokens 16384       2>$null | Out-Null
