@@ -520,7 +520,7 @@
     <section class="panel" id="tab-run">
       <span class="eyebrow">Earn from your computer</span>
       <h1>Run a node</h1>
-      <p class="sub">Rent your idle GPU/Mac time to run AI inference — <b>hardware-agnostic</b>: Apple Silicon Macs, NVIDIA GPUs (Linux or Windows via WSL2), even CPU. You earn Koretex Points for the work your node does, with withdrawal coming in the future. No hardware is favored — demand flows to whoever is fastest/cheapest/best for each request.</p>
+      <p class="sub">Rent your idle GPU/Mac time to run AI inference — <b>hardware-agnostic</b>: Apple Silicon Macs, NVIDIA GPUs (Linux, or Windows natively), even CPU. You earn Koretex Points for the work your node does, with withdrawal coming in the future. No hardware is favored — demand flows to whoever is fastest/cheapest/best for each request.</p>
 
       <div class="card">
         <h3>How it works</h3>
@@ -540,7 +540,7 @@
         <div id="run_cmdbox" class="hidden">
           <p style="margin:14px 0 0;font-weight:600">2 · Run this in your terminal:</p>
           <div class="codeblock"><code id="run_cmd">—</code><button class="btn btn-ghost btn-sm" id="run_copy" style="background:rgba(43,255,136,.14);color:var(--grn);border-color:rgba(43,255,136,.3)">Copy</button></div>
-          <p class="note">Linked to <span class="addr" id="run_who"></span> — earnings go here. Keep this command private; it contains your node token. <b>Windows users: run it inside WSL2 Ubuntu, not PowerShell</b> (see below).</p>
+          <p class="note">Linked to <span class="addr" id="run_who"></span> — earnings go here. Keep this command private; it contains your node token. This is the <b>macOS / Linux / WSL</b> command — <b>native Windows users: use the PowerShell command in the Windows section below</b>.</p>
         </div>
       </div>
 
@@ -554,17 +554,17 @@
         </ol>
         <p class="note">It installs everything (engine, model, auto-start via launchd — survives reboot) and links your wallet. If it stops asking for <b>Node.js</b>, install it once from <a href="https://nodejs.org" target="_blank" rel="noopener">nodejs.org</a> (macOS LTS .pkg) and re-run. Needs macOS 13+, 16GB+.</p>
 
-        <h4 style="margin:18px 0 4px">🪟 Windows + NVIDIA — via WSL2 (Ubuntu)</h4>
-        <p class="note">You'll run the node inside <b>WSL2</b>, a real Ubuntu Linux that uses your NVIDIA GPU. Do everything in the <b>Ubuntu</b> window — <b>not</b> PowerShell (PowerShell gives <code>'DISPATCHER=…' is not recognized</code>). First make sure your <b>NVIDIA driver is up to date</b> (from nvidia.com / GeForce Experience) — that's what exposes the GPU to WSL.</p>
+        <h4 style="margin:18px 0 4px">🪟 Windows + NVIDIA — native <span class="note" style="font-weight:400">· recommended, no WSL</span></h4>
+        <p class="note">Runs <b>directly on Windows</b> using your NVIDIA GPU — no WSL. Requirements: an <b>NVIDIA GPU with an up-to-date driver</b> (open PowerShell, run <code>nvidia-smi</code> — it should list your card) and <b>Node.js 20+</b> (the installer adds it automatically via <code>winget</code> if it's missing).</p>
         <ol style="padding-left:1.1rem;margin-top:6px;color:var(--ink)" class="note">
-          <li><b>Open an admin terminal:</b> right-click the Start button → <b>Terminal (Admin)</b>.</li>
-          <li><b>Install Ubuntu:</b> <code>wsl --install</code>, then reboot. After reboot an Ubuntu window opens and asks you to create a username + password (used for <code>sudo</code>). If none opens, launch <b>Ubuntu</b> from the Start menu.</li>
-          <li><b>Turn on systemd</b> (keeps the node running) — in the <b>Ubuntu</b> window:<div class="codeblock"><code>printf '[boot]\nsystemd=true\n' | sudo tee /etc/wsl.conf</code></div>Then in PowerShell run <code>wsl --shutdown</code>, and reopen <b>Ubuntu</b> from the Start menu.</li>
-          <li><b>Check the GPU is visible</b> from Ubuntu: <code>nvidia-smi</code> should list your RTX card.</li>
-          <li><b>Install Node 20 + zstd:</b><div class="codeblock"><code>sudo apt-get update &amp;&amp; sudo apt-get install -y zstd
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sudo apt-get install -y nodejs</code></div></li>
-          <li><b>Paste your install command</b> (from step 1 above) into the <b>Ubuntu</b> window. It sets the node up as a system service that survives logout. (To survive a full Windows reboot too, see "Keep your node running" below.)</li>
+          <li>Open <b>PowerShell</b> (press Start, type "PowerShell", Enter). You do <b>not</b> need admin.</li>
+          <li>Paste this <b>PowerShell</b> command (it links to your wallet — keep it private, it contains your node token):
+            <div class="codeblock"><code id="run_cmd_win">— log in above to generate your command —</code><button class="btn btn-ghost btn-sm" id="run_copy_win" style="background:rgba(43,255,136,.14);color:var(--grn);border-color:rgba(43,255,136,.3)">Copy</button></div>
+          </li>
+          <li>It downloads the CUDA engine (Ollama for Windows), pulls a model, links your wallet, and registers an <b>auto-start task</b> (survives reboot after you log in). When it finishes you'll see <b>✅ Done</b>.</li>
+          <li>Control it in a <b>new</b> PowerShell window: <code>koretex status</code> · <code>koretex stop</code> · <code>koretex start</code>.</li>
         </ol>
+        <p class="note">⚠️ Use the <b>PowerShell</b> command above on native Windows — <b>not</b> the bash command from step 1 (that one is for macOS/Linux/WSL and gives <code>'DISPATCHER=…' is not recognized</code> in PowerShell). Prefer Linux-in-Windows? See the WSL2 fallback at the end of this section.</p>
 
         <h4 style="margin:18px 0 4px">🐧 Linux + NVIDIA (or CPU)</h4>
         <ol style="padding-left:1.1rem;margin-top:6px;color:var(--ink)" class="note">
@@ -573,6 +573,20 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sudo apt-get install -y nodejs</code></div>(RHEL/Fedora: <code>sudo dnf install -y zstd nodejs</code> · Arch: <code>sudo pacman -S zstd nodejs</code> — Node must be 20+.)</li>
           <li>Paste the install command from step 1. It installs as a systemd system service (survives logout/reboot) — nothing else to do.</li>
         </ol>
+
+        <details style="margin-top:16px">
+          <summary style="cursor:pointer;font-weight:600">🪟 Fallback: Windows via WSL2 (Ubuntu)</summary>
+          <p class="note" style="margin-top:8px">Only if native Windows has trouble (e.g. the NVIDIA driver isn't exposed to Windows). You run the node inside <b>WSL2</b> and everything happens in the <b>Ubuntu</b> window — <b>not</b> PowerShell. Make sure your <b>NVIDIA driver is up to date</b> first (nvidia.com / GeForce Experience).</p>
+          <ol style="padding-left:1.1rem;margin-top:6px;color:var(--ink)" class="note">
+            <li><b>Open an admin terminal:</b> right-click the Start button → <b>Terminal (Admin)</b>.</li>
+            <li><b>Install Ubuntu:</b> <code>wsl --install</code>, then reboot. An Ubuntu window opens and asks you to create a username + password (for <code>sudo</code>). If none opens, launch <b>Ubuntu</b> from the Start menu.</li>
+            <li><b>Turn on systemd</b> — in the <b>Ubuntu</b> window:<div class="codeblock"><code>printf '[boot]\nsystemd=true\n' | sudo tee /etc/wsl.conf</code></div>Then in PowerShell run <code>wsl --shutdown</code>, and reopen <b>Ubuntu</b>.</li>
+            <li><b>Check the GPU:</b> <code>nvidia-smi</code> in Ubuntu should list your RTX card.</li>
+            <li><b>Install Node 20 + zstd:</b><div class="codeblock"><code>sudo apt-get update &amp;&amp; sudo apt-get install -y zstd
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sudo apt-get install -y nodejs</code></div></li>
+            <li><b>Paste the bash install command</b> (from step 1) into the <b>Ubuntu</b> window (not the PowerShell one). To survive a full reboot, also see "Keep your node running" below.</li>
+          </ol>
+        </details>
       </div>
 
       <div class="card">
@@ -595,7 +609,8 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
         <p class="note" style="margin:4px 0 10px">By default the node runs under your login session, so it stops when you log out or close the terminal. To keep it serving 24/7:</p>
         <table class="cmd-table">
           <tr><td><b>macOS</b></td><td class="note">Already persistent — the launchd service auto-starts at login and respawns on crash. Nothing to do.</td></tr>
-          <tr><td><b>Linux / WSL</b></td><td class="note">Installs as a <b>systemd system service</b> (runs under PID 1 as your user) — already persistent across logout, no linger needed. Control: <code>sudo systemctl status|start|stop koretex-node-agent</code>. <i>(Older <code>--user</code> installs instead need <code>sudo loginctl enable-linger $USER</code>.)</i></td></tr>
+          <tr><td><b>Windows (native)</b></td><td class="note">Already persistent — the installer registers a per-user <b>Scheduled Task</b> (<code>KoretexNodeAgent</code>) that starts at logon and restarts on crash, surviving reboot once you log in. Control with <code>koretex stop</code> / <code>koretex start</code>. (If task registration was blocked, it falls back to a Startup-folder launcher — same effect.)</td></tr>
+          <tr><td><b>Linux / WSL (fallback)</b></td><td class="note">Installs as a <b>systemd system service</b> (runs under PID 1 as your user) — already persistent across logout, no linger needed. Control: <code>sudo systemctl status|start|stop koretex-node-agent</code>. <i>(Older <code>--user</code> installs instead need <code>sudo loginctl enable-linger $USER</code>.)</i></td></tr>
           <tr><td><b>Windows / WSL — always-on</b></td><td class="note">WSL also shuts the Linux VM down when idle or on reboot. To survive that, create a Windows <b>Task Scheduler</b> task that runs <code>wsl -d Ubuntu -u root true</code> (or <code>wsl ~</code>) <b>At log on</b> / <b>At startup</b> — that boots the distro (and, with linger enabled, your node) automatically.</td></tr>
         </table>
         <p class="note" style="margin-top:10px">Bring it back manually anytime: <code>koretex start</code> (or <code>systemctl --user start koretex-ollama koretex-node-agent</code>).</p>
@@ -605,7 +620,7 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
         <h3>Troubleshooting</h3>
         <table class="cmd-table">
           <tr><td><code>koretex: command not found</code></td><td class="note">The <code>koretex</code> wrapper isn't on your current shell's PATH yet. Open a <b>new</b> terminal, or run <code>export PATH="$HOME/.local/bin:$PATH"</code> now (older installs used <code>$HOME/.koretex/bin</code> — use that path if the file is there: <code>ls ~/.koretex/bin/koretex</code>). New terminals pick it up automatically.</td></tr>
-          <tr><td><code>'DISPATCHER=…' is not recognized</code> (Windows)</td><td class="note">You're in <b>PowerShell</b>. The installer is a Linux/bash script — run it inside <b>WSL2 Ubuntu</b> instead (see Windows setup above).</td></tr>
+          <tr><td><code>'DISPATCHER=…' is not recognized</code> (Windows)</td><td class="note">You pasted the <b>bash</b> command into <b>PowerShell</b>. On native Windows use the <b>PowerShell command</b> from the Windows section (<code>irm …/install.ps1 | iex</code>). Only the WSL2 fallback uses the bash command (inside Ubuntu).</td></tr>
           <tr><td>Node stops when I close the terminal</td><td class="note">Linger isn't enabled. Run <code>sudo loginctl enable-linger $USER</code>. On Windows/WSL also set up the Task Scheduler entry above so the WSL VM itself stays/comes back up.</td></tr>
           <tr><td><code>Failed to connect to bus</code> (<code>systemctl --user</code>, WSL)</td><td class="note">Your per-user systemd manager isn't up. First confirm systemd is running: <code>ps -p 1 -o comm=</code> should print <code>systemd</code> — if not, enable it (<code>sudo sh -c 'printf "[boot]\nsystemd=true\n" &gt; /etc/wsl.conf'</code>, then <code>wsl --shutdown</code> in PowerShell and reopen). Then start the user manager: <code>sudo loginctl enable-linger $USER</code>, <code>sudo systemctl start user@$(id -u).service</code>, and <code>export XDG_RUNTIME_DIR=/run/user/$(id -u)</code>. Verify with <code>ls /run/user/$(id -u)/bus</code>; now <code>systemctl --user …</code> works.</td></tr>
           <tr><td><code>systemctl: not found</code> / <code>-ash</code> prompt (WSL)</td><td class="note">You're in the wrong distro (e.g. <code>docker-desktop</code>). Enter Ubuntu: <code>wsl -d Ubuntu</code> (and <code>wsl --set-default Ubuntu</code> to make it the default).</td></tr>
@@ -1225,6 +1240,8 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
         const d = await res.json();
         if (!res.ok) throw new Error((d.error && d.error.message) || "Enrollment failed.");
         $("run_cmd").textContent = `curl -fsSL ${location.origin}/install | DISPATCHER=${location.origin} KORETEX_TOKEN=${d.token} KORETEX_WALLET=${d.address} bash`;
+        // Native-Windows equivalent (PowerShell) for the Windows section — same token/wallet.
+        { const w = $("run_cmd_win"); if (w) w.textContent = `$env:DISPATCHER='${location.origin}'; $env:KORETEX_TOKEN='${d.token}'; $env:KORETEX_WALLET='${d.address}'; irm ${location.origin}/install.ps1 | iex`; }
         $("run_who").textContent = d.address; $("run_out").innerHTML = "";
         btn.textContent = "Command generated ✓"; btn.disabled = true;
         $("run_cmdbox").classList.remove("hidden");
@@ -1248,6 +1265,7 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
   };
   $("run_enroll").addEventListener("click", () => Run.enroll());
   $("run_copy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("run_cmd").textContent); $("run_copy").textContent = "Copied"; } catch {} });
+  $("run_copy_win").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("run_cmd_win").textContent); $("run_copy_win").textContent = "Copied"; } catch {} });
 
   // ===================================================================== POINTS ESTIMATOR
   const Calc = {
