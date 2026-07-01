@@ -136,7 +136,7 @@ export interface NodeScore {
 }
 
 // --- tunable knobs (R-track: these get retuned in shadow mode before anything settles) ---------
-export const FORMULA_VERSION = 2; // v2: demand is weighted by model size (a heavy-model token > a light-model token)
+export const FORMULA_VERSION = 3; // v3: penalties are capped per epoch to a fraction of that epoch's gross (a mistaken authenticity flag can no longer zero an honest node); v2: demand weighted by model size
 const TRUST_RAMP_DAYS = 14; // a fresh identity ramps to full weight over ~2 weeks
 const TRUST_FLOOR = 0.1; // brand-new nodes still earn a little (so they start climbing)
 const HARDWARE_WEIGHT = 1.0; // scales sqrt(tokens/sec) into the additive term
@@ -144,6 +144,18 @@ const DIVERSITY_BONUS = 0.1; // per extra distinct model served with demand
 const AUTH_FAIL_FLOOR = 0.05; // a node failing authenticity checks keeps almost no model value
 const UPTIME_RATE = 1000; // points banked per full epoch of uptime, before the hardware bonus
 const DEMAND_WEIGHT_ANCHOR_B = 12; // the primary model's size (B params) — model weight is 1.0 here
+// Penalties bite, but proportionally: within one epoch they can erase at most this fraction of what
+// the node HONESTLY earned that epoch. So a penalty scales with the node's own contribution (a big
+// earner can lose more absolute points than a small one) and, crucially, a single false authenticity
+// flag can never drive an epoch — or the cumulative total — to zero. Real fakers still bleed here AND
+// get their model value crushed by the auth gate AND get blacklisted after repeated strikes.
+const PENALTY_MAX_FRACTION = 0.5;
+
+/** Cap penalties at PENALTY_MAX_FRACTION of the gross earned in the same window, then subtract. Shared
+ *  by the aggregate and per-epoch scorers so the cap math lives in one place. */
+function applyPenalty(gross: number, penalties: number): number {
+  return gross - Math.min(Math.max(0, penalties), gross * PENALTY_MAX_FRACTION);
+}
 
 // The availability sweep records one uptime sample per node per this interval (must match the
 // dispatcher's UPTIME_SAMPLE_MS). A full epoch of continuous uptime ⇒ this many "up" samples,
@@ -164,6 +176,7 @@ export const FORMULA_PARAMS = {
   authFailFloor: AUTH_FAIL_FLOOR,
   uptimeRate: UPTIME_RATE,
   demandWeightAnchorB: DEMAND_WEIGHT_ANCHOR_B,
+  penaltyMaxFraction: PENALTY_MAX_FRACTION,
 };
 
 /**
@@ -200,8 +213,9 @@ export function modelWeight(model?: string): number {
  *  - modelValue rewards realized DEMAND (sqrt of units), diversity-bonused and authenticity-gated;
  *    additive and monotonic (units only accrue while serving).
  *  - trustRamp is the no-staking sybil tax: new identities earn at a floor and ramp with age.
- *  - penalties (fraud / fake-model serves) are still subtracted — that's deliberate and unrelated to
- *    downtime; floored at 0 so points never go negative.
+ *  - penalties (fraud / fake-model serves) are still subtracted — deliberate and unrelated to
+ *    downtime — but capped per epoch at PENALTY_MAX_FRACTION of that epoch's gross, so they scale with
+ *    what the node earned and a single mistaken authenticity flag can't zero an honest node.
  */
 export function scoreNode(s: NodeSignals): NodeScore {
   // Measured hardware capability (diminishing returns).
@@ -229,10 +243,8 @@ export function scoreNode(s: NodeSignals): NodeScore {
   // full epochs' worth of "up & serving" the node has banked, from the COUNT of up-samples (which
   // only ever increases — downtime stops adding, never subtracts).
   const uptimeCredits = s.uptimeUp / UPTIME_SAMPLES_PER_EPOCH;
-  const points =
-    s.cumulativePoints !== undefined
-      ? s.cumulativePoints
-      : trustRamp * (uptimeCredits * (UPTIME_RATE + hardwareCapability) + modelValue) - s.penalties;
+  const gross = trustRamp * (uptimeCredits * (UPTIME_RATE + hardwareCapability) + modelValue);
+  const points = s.cumulativePoints !== undefined ? s.cumulativePoints : applyPenalty(gross, s.penalties);
 
   // Display-only: the share of sampled time the node was actually up (informational %, can move
   // down as a stat, but no longer pulls points down with it).
@@ -434,8 +446,9 @@ export function summaryToSignals(nodeId: string, c: SummaryCounters, uniqueModel
 /** Points EARNED in one epoch, with the trust ramp locked at that epoch's age — so the value a
  *  node banked is frozen and never re-scales as it later ages or sits idle. This is the unit the
  *  cumulative total sums over; downtime simply means fewer uptime credits that epoch, never a
- *  subtraction from other epochs. Penalties for that epoch are folded in (can go negative for the
- *  epoch; the caller floors the total at 0). */
+ *  subtraction from other epochs. Penalties for that epoch are folded in but capped at
+ *  PENALTY_MAX_FRACTION of the epoch's gross, so an epoch's contribution never goes negative and a
+ *  stray authenticity flag can't erase points banked in other epochs. */
 export function epochContribution(c: SummaryCounters, uniqueModels: number, epoch: number, firstSeenMs: number): number {
   const epochStartMs = EPOCH_GENESIS_MS + epoch * EPOCH_MS;
   const ageDays = Math.max(0, (epochStartMs - firstSeenMs) / EPOCH_MS);
@@ -446,7 +459,8 @@ export function epochContribution(c: SummaryCounters, uniqueModels: number, epoc
   const authGate = c.authChecked === 0 ? 1 : lerp(AUTH_FAIL_FLOOR, 1, clamp01(c.authPassed / c.authChecked));
   const modelValue = demand * diversity * authGate;
   const uptimeCredits = c.uptimeUp / UPTIME_SAMPLES_PER_EPOCH;
-  return trust * (uptimeCredits * (UPTIME_RATE + hardware) + modelValue) - c.penalties;
+  const gross = trust * (uptimeCredits * (UPTIME_RATE + hardware) + modelValue);
+  return applyPenalty(gross, c.penalties);
 }
 
 /** Build a node's NodeSignals from its per-epoch counter rows: aggregate counters drive the display

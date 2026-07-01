@@ -236,14 +236,16 @@ const blacklist: BlacklistStore = new InMemoryBlacklist();
 const modelPricing: ModelPricingStore = process.env.DATABASE_URL
   ? new PostgresModelPricing(process.env.DATABASE_URL)
   : new InMemoryModelPricing();
-const PENALTY_UNITS = Number(process.env.PENALTY_UNITS ?? 5000); // score magnitude per fake-model catch
+const PENALTY_UNITS = Number(process.env.PENALTY_UNITS ?? 500); // score magnitude per fake-model catch (capped per epoch to a fraction of the node's own earnings in points.ts, so this is a rate, not a guillotine)
+const PENALTY_MIN_STRIKES = Number(process.env.PENALTY_MIN_STRIKES ?? 3); // consecutive authenticity failures a NODE must rack up before any penalty is recorded — one divergent greedy output (honest hardware/engine nondeterminism) is noise, a persistent run is a real fake
 const BLACKLIST_STRIKES = Number(process.env.BLACKLIST_STRIKES ?? 5); // failures before an auto-ban
-const authFailStrikes = new Map<string, number>(); // owner -> consecutive authenticity failures
+const authFailStrikes = new Map<string, number>(); // owner -> consecutive authenticity failures (drives the auto-ban)
+const nodeAuthFails = new Map<string, number>(); // nodeId -> consecutive authenticity failures (gates the penalty; per-node so one node's divergence never penalizes its siblings)
 
 // Challenge prober (R1): periodically probes connected nodes with jobs indistinguishable from
 // real traffic, recording `challenge` events (reachability + throughput + model authenticity).
 // Only nodes whose owner is a real wallet are probed — legacy/dev nodes don't earn points.
-const fingerprints = new FingerprintRegistry(Number(process.env.PROBE_QUORUM ?? 2));
+const fingerprints = new FingerprintRegistry(Number(process.env.PROBE_QUORUM ?? 2), Number(process.env.PROBE_MATCH_THRESHOLD ?? 0.8));
 const prober = new Prober(
   {
     listTargets: () =>
@@ -268,12 +270,22 @@ const prober = new Prober(
       if (live) live.serving = o.result.ok;
       if (o.modelVerified === false) {
         const at = Date.now();
-        points.record(
-          newEvent({ nodeId: o.target.nodeId, owner: o.target.owner, kind: "penalty", at, model: o.model, units: PENALTY_UNITS, detail: { reason: "model_authenticity", promptId: o.promptId } }),
-        );
+        const fails = (nodeAuthFails.get(o.target.nodeId) ?? 0) + 1;
+        nodeAuthFails.set(o.target.nodeId, fails);
+        // Only start deducting once a node has failed authenticity PENALTY_MIN_STRIKES times in a
+        // ROW. A single divergent greedy output is honest hardware/engine noise (see fingerprint.ts);
+        // a real fake-model serve fails every probe, so it crosses the threshold and then pays on each
+        // further miss. A clean verification below resets the run.
+        if (fails >= PENALTY_MIN_STRIKES) {
+          points.record(
+            newEvent({ nodeId: o.target.nodeId, owner: o.target.owner, kind: "penalty", at, model: o.model, units: PENALTY_UNITS, detail: { reason: "model_authenticity", promptId: o.promptId, consecutiveFails: fails } }),
+          );
+          console.log(`[penalty] ${o.target.owner.slice(0, 6)}… failed authenticity on ${o.model} (${fails} in a row)`);
+        } else {
+          console.log(`[authenticity] ${o.target.owner.slice(0, 6)}… mismatch on ${o.model} (${fails}/${PENALTY_MIN_STRIKES} before penalty)`);
+        }
         const strikes = (authFailStrikes.get(o.target.owner) ?? 0) + 1;
         authFailStrikes.set(o.target.owner, strikes);
-        console.log(`[penalty] ${o.target.owner.slice(0, 6)}… failed authenticity on ${o.model} (strike ${strikes}/${BLACKLIST_STRIKES})`);
         if (strikes >= BLACKLIST_STRIKES && !blacklist.has(o.target.owner)) {
           blacklist.add(o.target.owner, `auto: ${strikes} authenticity failures`, at);
           console.log(`[blacklist] banned ${o.target.owner.slice(0, 6)}… (repeated fake-model serves)`);
@@ -281,6 +293,7 @@ const prober = new Prober(
         }
       } else if (o.modelVerified === true) {
         authFailStrikes.delete(o.target.owner);
+        nodeAuthFails.delete(o.target.nodeId);
       }
     },
   },
