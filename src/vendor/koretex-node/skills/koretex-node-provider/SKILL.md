@@ -40,6 +40,7 @@ koretex balance
 | Bring the node up + auto-wire this agent — **Windows (native)** | `powershell -ExecutionPolicy Bypass -File "$env:HERMES_SKILL_DIR\scripts\koretex-up.ps1"` |
 | Status + credit balance | `…/scripts/koretex-status.sh` (Windows: `koretex-status.ps1`) |
 | Credit balance only | `koretex balance` |
+| Open the web dashboard for this node's keypair (no login) | `koretex dashboard` |
 | Re-pick the best model to serve | `koretex autoserve` |
 | Pause / resume serving | `koretex stop` / `koretex start` |
 
@@ -57,7 +58,7 @@ Files this machine writes (all `0600`): `~/.koretex/wallet.json` (wallet secret 
 
 2. **Tell the user to restart Hermes.** The config only loads in a **fresh Hermes process** — `quit and relaunch \`hermes\``. `/new` alone does **not** reload it (a new session reuses the running process's startup config).
 
-3. **Report:** the served (earning) model, the consume model now configured, the wallet address, the current balance (from the script / `koretex balance`), and the dashboard URL. Never print the `sk-cust-…` key or the wallet secret — reference them by file path.
+3. **Report:** the served (earning) model, the consume model now configured, the wallet address, the current balance (from the script / `koretex balance`), and the dashboard URL. Never print the `sk-cust-…` key or the wallet secret — reference them by file path. To open the web dashboard for **this machine's own keypair** (no Google login needed), the user can run `koretex dashboard` — it signs with the local wallet and opens an authenticated session.
 
 ## Windows (native — no WSL)
 

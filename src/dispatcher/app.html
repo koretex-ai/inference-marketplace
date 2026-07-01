@@ -814,8 +814,11 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
 
   // ===================================================================== DASHBOARD
   const Dash = {
-    session: null, pointsTimer: null,
+    session: null, pointsTimer: null, keypairMode: false,
     async load() {
+      // Keypair-dashboard access (opened via `koretex dashboard`) already holds a session and has no
+      // browser-side key to sign with — route to the session loader instead of the signing flow.
+      if (Dash.keypairMode) return Dash.loadWithSession(address, Dash.session);
       $("dashGate").classList.add("hidden"); $("dashBody").classList.remove("hidden");
       try {
         const ch = await (await fetch("/provider/challenge")).json();
@@ -825,6 +828,18 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
         if (!res.ok) throw new Error((d.error && d.error.message) || "Could not load stats.");
         Dash.render(d);
         if (d.session) { Dash.session = d.session; Dash.startLive(); }
+      } catch (e) { show($("dashOut"), "err", (e && e.message) || String(e)); }
+    },
+    // Load using an existing session token (keypair access) — no challenge, no browser-side signature.
+    async loadWithSession(pubkey, session) {
+      $("dashGate").classList.add("hidden"); $("dashBody").classList.remove("hidden");
+      try {
+        const res = await fetch("/provider/stats", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey, session }) });
+        const d = await res.json();
+        if (!res.ok) throw new Error((d.error && d.error.message) || "Could not load stats.");
+        Dash.render(d);
+        if (d.session) Dash.session = d.session;
+        Dash.startLive();
       } catch (e) { show($("dashOut"), "err", (e && e.message) || String(e)); }
     },
     render(d) {
@@ -881,10 +896,30 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
     },
     reset() {
       if (Dash.pointsTimer) { clearInterval(Dash.pointsTimer); Dash.pointsTimer = null; }
-      Dash.session = null;
+      Dash.session = null; Dash.keypairMode = false;
       $("dashBody").classList.add("hidden"); $("dashGate").classList.remove("hidden"); $("dashOut").innerHTML = "";
     },
   };
+
+  // --------------------------------------------------------------- keypair dashboard bootstrap
+  // `koretex dashboard` opens us at /dashboard#kx=<base64url {pubkey,session,exp}> so a node's
+  // self-custody keypair can view its dashboard with NO Google/Phantom login. Adopt the session,
+  // skip the gate, and strip the token from the URL immediately. Deferred via setTimeout so the
+  // onWallet subscribers (which trigger Dash.load) are registered before setAddress fires.
+  function bootstrapKeypairSession() {
+    try {
+      const m = (location.hash || "").match(/kx=([A-Za-z0-9_\-]+)/);
+      if (!m) return;
+      const data = JSON.parse(atob(m[1].replace(/-/g, "+").replace(/_/g, "/")));
+      if (!data || !data.pubkey || !data.session) return;
+      history.replaceState(null, "", location.pathname + "#dashboard");
+      Dash.keypairMode = true;
+      Dash.session = data.session;
+      selectTab("dashboard", false);   // make the dashboard tab active so onWallet loads it
+      setAddress(data.pubkey);         // fires onWallet → Dash.load() → loadWithSession (guarded)
+    } catch (e) { console.error("keypair dashboard bootstrap failed", e); }
+  }
+  setTimeout(bootstrapKeypairSession, 0);
 
   // ===================================================================== CREDITS
   const Credits = {

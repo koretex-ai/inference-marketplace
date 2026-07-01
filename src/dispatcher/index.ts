@@ -1227,23 +1227,29 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
   if (req.method === "POST" && url.pathname === "/provider/stats") {
     return readJson(req, res, async (b) => {
       const pubkey = String(b.pubkey ?? "");
-      const nonce = String(b.nonce ?? "");
-      const signature = String(b.signature ?? "");
       if (!isValidSolanaAddress(pubkey))
         return json(res, 400, { error: { message: "invalid account address" } });
-      if (!challenges.consume(nonce, Date.now()))
-        return json(res, 401, { error: { message: "challenge expired — reload and try again" } });
-      if (!verifyWalletSignature(pubkey, buildDashboardMessage(nonce), signature))
-        return json(res, 401, { error: { message: "signature verification failed" } });
+      // Auth: EITHER a live session OR a freshly-signed dashboard nonce. The session path lets a
+      // keypair-dashboard user (opened via `koretex dashboard`, which already signed) load stats in
+      // the browser without a browser-side key to re-sign with. A valid session proves prior signing.
+      const session = String(b.session ?? "");
+      if (!(session && sessions.resolve(session, Date.now()) === pubkey)) {
+        const nonce = String(b.nonce ?? "");
+        const signature = String(b.signature ?? "");
+        if (!challenges.consume(nonce, Date.now()))
+          return json(res, 401, { error: { message: "challenge expired — reload and try again" } });
+        if (!verifyWalletSignature(pubkey, buildDashboardMessage(nonce), signature))
+          return json(res, 401, { error: { message: "signature verification failed" } });
+      }
       await ensureWelcomeCredits(pubkey); // node operators get welcome credits too (to test inference)
       const stats = await settlement.providerStats(pubkey);
-      // Include the wallet's points (R2) in the same signed response — no extra signature prompt.
+      // Include the wallet's points (R2) in the same response — no extra signature prompt.
       const pts = await points.pointsFor(pubkey, { now: Date.now() });
       const creditsEarned = await creditStore.earned(pubkey); // realised credits from serving inference
-      // Open a session so the dashboard can poll /points/live for real-time updates WITHOUT
-      // prompting another signature on each refresh.
-      const { token: session, expiresAt } = sessions.issue(pubkey, Date.now());
-      return json(res, 200, { ...stats, creditsEarned, liveNodes: liveNodesFor(pubkey), points: pts, session, sessionExpiresAt: expiresAt });
+      // (Re)issue a session so the dashboard can poll /points/live for real-time updates WITHOUT
+      // prompting another signature on each refresh (and to refresh a keypair user's TTL).
+      const { token: session2, expiresAt } = sessions.issue(pubkey, Date.now());
+      return json(res, 200, { ...stats, creditsEarned, liveNodes: liveNodesFor(pubkey), points: pts, session: session2, sessionExpiresAt: expiresAt });
     });
   }
   // Real-time personal points (R2): poll-friendly, session-gated (no per-poll signature), returns
