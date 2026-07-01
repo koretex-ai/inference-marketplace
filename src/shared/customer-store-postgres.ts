@@ -41,7 +41,7 @@ export class PostgresCustomerStore implements CustomerStore {
   async resolveKey(key: string): Promise<string | null> {
     const r = await this.pool.query(
       `SELECT wallet FROM customer_keys WHERE api_key = $1 AND revoked = false`,
-      [key],
+      [key.trim()], // tolerate a trailing CR/whitespace from clients (e.g. Hermes' .env on Windows)
     );
     return r.rows[0]?.wallet ?? null;
   }

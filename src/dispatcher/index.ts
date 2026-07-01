@@ -1585,7 +1585,9 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
 
 function handleChat(req: http.IncomingMessage, res: http.ServerResponse) {
   const auth = req.headers["authorization"] ?? "";
-  const key = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  // Trim the token — some clients (notably Hermes reading its .env on Windows) pass a trailing
+  // CR/newline/space with the key, which would otherwise miss the exact-match lookup and 401.
+  const key = (auth.startsWith("Bearer ") ? auth.slice(7) : "").trim();
 
   let body = "";
   req.on("data", (c) => (body += c));
