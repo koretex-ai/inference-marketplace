@@ -533,6 +533,15 @@
       </div>
 
       <div class="card">
+        <h3>Preview first — no login, installs nothing</h3>
+        <p class="note" style="margin:4px 0 12px">See which models <b>your</b> machine can serve and what each earns on the network right now, before you install anything. It ranks the models that fit by live demand — the same pick <code>koretex autoserve</code> makes after install.</p>
+        <p style="margin:10px 0 2px;font-weight:600">🍎 macOS / 🐧 Linux</p>
+        <div class="codeblock"><code>curl -fsSL https://koretex.ai/skills/koretex-node-provider/scripts/koretex-preview.sh | bash</code></div>
+        <p style="margin:12px 0 2px;font-weight:600">🪟 Windows (PowerShell)</p>
+        <div class="codeblock"><code>irm https://koretex.ai/skills/koretex-node-provider/scripts/koretex-preview.ps1 | iex</code></div>
+      </div>
+
+      <div class="card">
         <h3>1 · Log in &amp; approve the signature</h3>
         <p class="note" style="margin:4px 0 12px">Once you <b>Login with Google</b>, approve the one-time wallet signature and your personalised install command appears below. (Use the button if you need to regenerate it.)</p>
         <button class="btn btn-grad" id="run_enroll" disabled>Log in first</button>
