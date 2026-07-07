@@ -1,29 +1,988 @@
 {
-  "_comment": "Curated catalog of Ollama models providers can serve via /v1/chat/completions. Each entry carries approx on-disk size (Q4-class), a sane minimum accelerator-memory requirement (`minRamGb` — the memory the model + context must fit in: Apple Silicon = unified memory at ~70% with room for the OS; NVIDIA = VRAM; CPU = capped system RAM. The dispatcher gates fit on the node's reported `acceleratorMemGb`, falling back to legacy `ram`), a `type` (text|code|vision), and `tags` capability badges (reasoning, tools, agentic, code, general, fast, vision, grounding). Served at /models/catalog; the installer and `koretex models` filter by the Mac's actual RAM + free disk and show the badges. `primary` marks the model the network most wants. The ceiling is high-end CONSUMER Apple Silicon — the largest entries target an M3 Ultra Mac Studio (256–512GB); nothing here needs datacenter GPUs. VISION (VLM) models are served over the SAME /v1/chat/completions path (image in, text out) and are allowed, but they're kept out of the tok/s hardware metric (image prefill distorts throughput) — give them conservative `minRamGb` floors since image KV needs headroom. Embedding/image-gen models need other endpoints/units and remain intentionally excluded (filtered server-side). A `tag` is normally an Ollama-library name (`qwen3:8b`); it can also be a HuggingFace GGUF via Ollama's passthrough (`hf.co/<org>/<repo>:<QUANT>`) — providers pull those the same way, but note Ollama serves/bills the LOWERCASED id (pricing + points are case-insensitive to match). Grow this list with what customers actually demand.",
+  "_comment": "Curated catalog of models providers can serve via /v1/chat/completions, refreshed July 2026 and tag-verified against the live Ollama registry (registry.ollama.ai) so every entry is actually pullable. Each entry carries approx on-disk size (Q4-class `sizeGb`), a conservative minimum accelerator-memory floor (`minRamGb` \u2014 the memory the weights + context must fit in: Apple Silicon = unified memory; NVIDIA = VRAM; CPU = capped system RAM. The dispatcher gates fit on the node's reported `acceleratorMemGb`/`accel`, falling back to legacy `ram`), a `type` (text|code|vision), and `tags` capability badges (reasoning, tools, agentic, code, general, fast, vision, grounding, moe, rag). Served at /models/catalog; the installer, `koretex models`, `koretex autoserve`, and the pre-install `koretex-preview` script filter by the machine's actual accelerator RAM + free disk (fit = minRamGb<=accel AND sizeGb+10<=freeDisk) and show the badges. `primary` marks the model the network most wants. pointsWeight and price are derived server-side from the tag (modelWeight parses the param count; pricing.rate falls back for unpriced tags) \u2014 new tags are safe to add. The ceiling is high-end CONSUMER Apple Silicon: most entries target 8-256GB Macs/GPUs, and a few frontier MoE (Qwen3-Coder 480B, DeepSeek V3.1 671B) carry 320-512GB floors so they only surface on a maxed M3 Ultra Mac Studio \u2014 nothing needs datacenter GPUs. VISION (VLM) models serve over the SAME /v1/chat/completions path (image in, text out) and are allowed, but kept out of the tok/s hardware metric (image prefill distorts throughput). Embedding/image-gen models need other endpoints and stay excluded (filtered server-side). A `tag` is normally an Ollama-library name (`qwen3:8b`); it can also be a HuggingFace GGUF via Ollama passthrough (`hf.co/<org>/<repo>:<QUANT>`). Ollama serves/bills the LOWERCASED id (pricing + points are case-insensitive). Grow this list with what customers actually demand.",
   "models": [
-    { "tag": "llama3.2:3b",         "name": "Llama 3.2 3B",           "sizeGb": 2,   "minRamGb": 8,   "type": "text", "tags": ["general", "fast"],                       "desc": "Small & fast — light tasks" },
-    { "tag": "qwen3:4b",            "name": "Qwen3 4B",               "sizeGb": 3,   "minRamGb": 8,   "type": "text", "tags": ["reasoning", "tools", "fast"],            "desc": "Tiny hybrid-reasoning model with tool calling" },
-    { "tag": "llama3.1:8b",         "name": "Llama 3.1 8B",           "sizeGb": 5,   "minRamGb": 16,  "type": "text", "tags": ["general", "tools"],                      "desc": "General-purpose 8B" },
-    { "tag": "qwen2.5-coder:7b",    "name": "Qwen2.5 Coder 7B",       "sizeGb": 5,   "minRamGb": 16,  "type": "code", "tags": ["code"],                                  "desc": "Code-focused assistant" },
-    { "tag": "hf.co/mradermacher/Holo1.5-3B-GGUF:Q4_K_M", "name": "Holo1.5 3B (web grounding VLM)", "sizeGb": 3, "minRamGb": 12, "type": "vision", "tags": ["vision", "grounding"], "desc": "Web/GUI grounding VLM — screenshot in, coordinates out" },
-    { "tag": "qwen2.5vl:7b",        "name": "Qwen2.5-VL 7B",          "sizeGb": 6,   "minRamGb": 24,  "type": "vision", "tags": ["vision", "general"],                   "desc": "General vision-language model" },
-    { "tag": "qwen3:8b",            "name": "Qwen3 8B",               "sizeGb": 5,   "minRamGb": 16,  "type": "text", "tags": ["reasoning", "tools", "agentic"],         "desc": "Strong reasoning + agentic tool calling at 8B" },
-    { "tag": "deepseek-r1:8b",      "name": "DeepSeek-R1 8B",         "sizeGb": 5,   "minRamGb": 16,  "type": "text", "tags": ["reasoning"],                             "desc": "Reasoning distill — strong chain-of-thought" },
-    { "tag": "hf.co/deepreinforce-ai/Ornith-1.0-9B-GGUF:Q4_K_M",  "name": "Ornith 1.0 9B (agentic coder)",  "sizeGb": 6,  "minRamGb": 16, "type": "code", "tags": ["code", "agentic", "tools", "reasoning"], "desc": "Agentic-coding specialist (Qwen3.5-based, MIT) — pulled from HuggingFace" },
-    { "tag": "gemma3:12b-it-qat",   "name": "Gemma 3 12B (int4 QAT)", "sizeGb": 9,   "minRamGb": 16,  "type": "text", "tags": ["general"],                               "desc": "The network's primary model", "primary": true },
-    { "tag": "qwen3:14b",           "name": "Qwen3 14B",              "sizeGb": 9,   "minRamGb": 24,  "type": "text", "tags": ["reasoning", "tools", "agentic"],         "desc": "Mid-size reasoning + agentic tool calling" },
-    { "tag": "deepseek-r1:14b",     "name": "DeepSeek-R1 14B",        "sizeGb": 9,   "minRamGb": 24,  "type": "text", "tags": ["reasoning"],                             "desc": "Mid-size reasoning distill" },
-    { "tag": "gpt-oss:20b",         "name": "gpt-oss 20B (OpenAI)",   "sizeGb": 14,  "minRamGb": 24,  "type": "text", "tags": ["reasoning", "tools", "agentic"],         "desc": "OpenAI open-weight — reasoning + agentic tool use" },
-    { "tag": "devstral:24b",        "name": "Devstral 24B",           "sizeGb": 14,  "minRamGb": 32,  "type": "code", "tags": ["code", "agentic", "tools"],              "desc": "Purpose-built for agentic coding (SWE / tool use)" },
-    { "tag": "mistral-small3.2:24b","name": "Mistral Small 3.2 24B",  "sizeGb": 15,  "minRamGb": 32,  "type": "text", "tags": ["general", "tools"],                      "desc": "Strong general model + reliable tool calling" },
-    { "tag": "qwen3:30b-a3b",       "name": "Qwen3 30B-A3B (MoE)",    "sizeGb": 19,  "minRamGb": 32,  "type": "text", "tags": ["reasoning", "tools", "agentic", "fast"], "desc": "MoE — 30B quality at ~3B speed, agentic tools" },
-    { "tag": "qwen3-coder:30b",     "name": "Qwen3 Coder 30B (MoE)",  "sizeGb": 19,  "minRamGb": 32,  "type": "code", "tags": ["code", "agentic", "tools", "fast"],     "desc": "Agentic coding MoE — fast, strong tool calling" },
-    { "tag": "qwen3:32b",           "name": "Qwen3 32B",              "sizeGb": 20,  "minRamGb": 48,  "type": "text", "tags": ["reasoning", "tools", "agentic"],         "desc": "Large dense reasoning + agentic model" },
-    { "tag": "qwen2.5-coder:32b",   "name": "Qwen2.5 Coder 32B",      "sizeGb": 20,  "minRamGb": 48,  "type": "code", "tags": ["code"],                                  "desc": "Large code model" },
-    { "tag": "deepseek-r1:32b",     "name": "DeepSeek-R1 32B",        "sizeGb": 20,  "minRamGb": 48,  "type": "text", "tags": ["reasoning"],                             "desc": "Large reasoning distill" },
-    { "tag": "hf.co/deepreinforce-ai/Ornith-1.0-35B-GGUF:Q4_K_M", "name": "Ornith 1.0 35B (agentic coder)", "sizeGb": 21, "minRamGb": 48, "type": "code", "tags": ["code", "agentic", "tools", "reasoning"], "desc": "Agentic coding (Gemma4 + Qwen3.5, MIT) — pulled from HuggingFace" },
-    { "tag": "llama3.3:70b",        "name": "Llama 3.3 70B",          "sizeGb": 43,  "minRamGb": 96,  "type": "text", "tags": ["general", "tools"],                      "desc": "Frontier-class dense, needs lots of memory" },
-    { "tag": "gpt-oss:120b",        "name": "gpt-oss 120B (OpenAI)",  "sizeGb": 65,  "minRamGb": 128, "type": "text", "tags": ["reasoning", "tools", "agentic"],         "desc": "OpenAI open-weight MoE — frontier reasoning on a Mac" },
-    { "tag": "qwen3:235b-a22b",     "name": "Qwen3 235B-A22B (MoE)",  "sizeGb": 142, "minRamGb": 256, "type": "text", "tags": ["reasoning", "tools", "agentic"],         "desc": "Frontier open MoE — targets an M3 Ultra Mac Studio" }
+    {
+      "tag": "gemma3:1b",
+      "name": "Gemma 3 1B",
+      "sizeGb": 1,
+      "minRamGb": 8,
+      "type": "text",
+      "tags": [
+        "general",
+        "fast"
+      ],
+      "desc": "Compact Gemma 3 text model, 128K context."
+    },
+    {
+      "tag": "gemma3:270m",
+      "name": "Gemma 3 270M",
+      "sizeGb": 1,
+      "minRamGb": 8,
+      "type": "text",
+      "tags": [
+        "general",
+        "fast"
+      ],
+      "desc": "Ultra-tiny Google model for on-device use."
+    },
+    {
+      "tag": "granite4:350m",
+      "name": "IBM Granite 4 350M",
+      "sizeGb": 1,
+      "minRamGb": 8,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools",
+        "fast"
+      ],
+      "desc": "Tiny hybrid-Mamba Granite 4 for edge."
+    },
+    {
+      "tag": "llama3.2:1b",
+      "name": "Llama 3.2 1B",
+      "sizeGb": 1,
+      "minRamGb": 8,
+      "type": "text",
+      "tags": [
+        "general",
+        "fast",
+        "tools"
+      ],
+      "desc": "Meta's smallest Llama; fast on-device text."
+    },
+    {
+      "tag": "qwen3:0.6b",
+      "name": "Qwen3 0.6B",
+      "sizeGb": 1,
+      "minRamGb": 8,
+      "type": "text",
+      "tags": [
+        "general",
+        "reasoning",
+        "fast"
+      ],
+      "desc": "Smallest Qwen3; runs almost anywhere, optional thinking."
+    },
+    {
+      "tag": "qwen3:1.7b",
+      "name": "Qwen3 1.7B",
+      "sizeGb": 1,
+      "minRamGb": 8,
+      "type": "text",
+      "tags": [
+        "general",
+        "reasoning",
+        "tools",
+        "fast"
+      ],
+      "desc": "Small Qwen3 with hybrid reasoning + tools."
+    },
+    {
+      "tag": "smollm2:1.7b",
+      "name": "SmolLM2 1.7B",
+      "sizeGb": 1,
+      "minRamGb": 8,
+      "type": "text",
+      "tags": [
+        "general",
+        "fast"
+      ],
+      "desc": "HuggingFace compact 1.7B instruct model."
+    },
+    {
+      "tag": "tinyllama:latest",
+      "name": "TinyLlama 1.1B",
+      "sizeGb": 1,
+      "minRamGb": 8,
+      "type": "text",
+      "tags": [
+        "general",
+        "fast"
+      ],
+      "desc": "Classic 1.1B baseline; minimal resources."
+    },
+    {
+      "tag": "granite3.3:2b",
+      "name": "IBM Granite 3.3 2B",
+      "sizeGb": 2,
+      "minRamGb": 8,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools",
+        "fast"
+      ],
+      "desc": "Enterprise small Granite model, 128K context."
+    },
+    {
+      "tag": "llama3.2:3b",
+      "name": "Llama 3.2 3B",
+      "sizeGb": 2,
+      "minRamGb": 8,
+      "type": "text",
+      "tags": [
+        "general",
+        "fast",
+        "tools"
+      ],
+      "desc": "Capable 3B text model with tool calling."
+    },
+    {
+      "tag": "gemma3:4b",
+      "name": "Gemma 3 4B",
+      "sizeGb": 3,
+      "minRamGb": 8,
+      "type": "text",
+      "tags": [
+        "general",
+        "fast"
+      ],
+      "desc": "Default Gemma 3; capable general text at small size."
+    },
+    {
+      "tag": "nemotron-3-nano:4b",
+      "name": "NVIDIA Nemotron-3 Nano 4B",
+      "sizeGb": 3,
+      "minRamGb": 8,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools",
+        "fast"
+      ],
+      "desc": "Efficient agentic small model, 256K context."
+    },
+    {
+      "tag": "phi4-mini:3.8b",
+      "name": "Phi-4 Mini 3.8B",
+      "sizeGb": 3,
+      "minRamGb": 8,
+      "type": "text",
+      "tags": [
+        "general",
+        "reasoning",
+        "tools"
+      ],
+      "desc": "Microsoft mini; strong math/reasoning + function calling."
+    },
+    {
+      "tag": "qwen3:4b",
+      "name": "Qwen3 4B",
+      "sizeGb": 3,
+      "minRamGb": 8,
+      "type": "text",
+      "tags": [
+        "general",
+        "reasoning",
+        "tools",
+        "fast"
+      ],
+      "desc": "Punches above its size; thinking + tools."
+    },
+    {
+      "tag": "qwen3.5:4b",
+      "name": "Qwen3.5 4B",
+      "sizeGb": 3,
+      "minRamGb": 8,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools",
+        "fast"
+      ],
+      "desc": "Latest small Qwen3.5 dense model (2026)."
+    },
+    {
+      "tag": "deepseek-r1:7b",
+      "name": "DeepSeek-R1 7B",
+      "sizeGb": 5,
+      "minRamGb": 12,
+      "type": "text",
+      "tags": [
+        "reasoning"
+      ],
+      "desc": "Compact R1 reasoning distill (Qwen)."
+    },
+    {
+      "tag": "deepseek-r1:8b",
+      "name": "DeepSeek-R1 8B",
+      "sizeGb": 5,
+      "minRamGb": 16,
+      "type": "text",
+      "tags": [
+        "reasoning"
+      ],
+      "desc": "0528 R1 distilled onto Qwen3-8B; strong CoT."
+    },
+    {
+      "tag": "granite3.3:8b",
+      "name": "IBM Granite 3.3 8B",
+      "sizeGb": 5,
+      "minRamGb": 12,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools"
+      ],
+      "desc": "Enterprise Granite 3.3, 128K context."
+    },
+    {
+      "tag": "llama3.1:8b",
+      "name": "Llama 3.1 8B",
+      "sizeGb": 5,
+      "minRamGb": 16,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools"
+      ],
+      "desc": "General-purpose 8B workhorse."
+    },
+    {
+      "tag": "qwen3:8b",
+      "name": "Qwen3 8B",
+      "sizeGb": 5,
+      "minRamGb": 16,
+      "type": "text",
+      "tags": [
+        "general",
+        "reasoning",
+        "tools",
+        "agentic"
+      ],
+      "desc": "Strong reasoning + agentic tools at 8B."
+    },
+    {
+      "tag": "yi:9b",
+      "name": "Yi 9B",
+      "sizeGb": 5,
+      "minRamGb": 12,
+      "type": "text",
+      "tags": [
+        "general"
+      ],
+      "desc": "01.AI bilingual general-purpose model."
+    },
+    {
+      "tag": "mistral-nemo:12b",
+      "name": "Mistral NeMo 12B",
+      "sizeGb": 7,
+      "minRamGb": 12,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools"
+      ],
+      "desc": "Mistral/NVIDIA 12B general model, 128K context."
+    },
+    {
+      "tag": "gemma3n:e4b",
+      "name": "Gemma 3n E4B",
+      "sizeGb": 8,
+      "minRamGb": 12,
+      "type": "text",
+      "tags": [
+        "general",
+        "fast"
+      ],
+      "desc": "Mobile-first Gemma 3n (MatFormer) for phones/edge."
+    },
+    {
+      "tag": "deepseek-r1:14b",
+      "name": "DeepSeek-R1 14B",
+      "sizeGb": 9,
+      "minRamGb": 24,
+      "type": "text",
+      "tags": [
+        "reasoning"
+      ],
+      "desc": "Sweet-spot R1 distill for local reasoning."
+    },
+    {
+      "tag": "gemma3:12b-it-qat",
+      "name": "Gemma 3 12B (int4 QAT)",
+      "sizeGb": 9,
+      "minRamGb": 16,
+      "type": "text",
+      "tags": [
+        "general"
+      ],
+      "desc": "The network's primary general model.",
+      "primary": true
+    },
+    {
+      "tag": "phi4:14b",
+      "name": "Microsoft Phi-4 14B",
+      "sizeGb": 9,
+      "minRamGb": 16,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools"
+      ],
+      "desc": "Microsoft's flagship dense Phi-4."
+    },
+    {
+      "tag": "qwen3:14b",
+      "name": "Qwen3 14B",
+      "sizeGb": 9,
+      "minRamGb": 24,
+      "type": "text",
+      "tags": [
+        "reasoning",
+        "tools",
+        "agentic"
+      ],
+      "desc": "Mid-size reasoning + agentic tool calling."
+    },
+    {
+      "tag": "phi4-reasoning:14b",
+      "name": "Phi-4 Reasoning 14B",
+      "sizeGb": 11,
+      "minRamGb": 16,
+      "type": "text",
+      "tags": [
+        "reasoning"
+      ],
+      "desc": "Phi-4 tuned for chain-of-thought; strong math/logic."
+    },
+    {
+      "tag": "magistral:24b",
+      "name": "Magistral Small 24B",
+      "sizeGb": 14,
+      "minRamGb": 24,
+      "type": "text",
+      "tags": [
+        "reasoning",
+        "tools"
+      ],
+      "desc": "Mistral's efficient 24B reasoning model."
+    },
+    {
+      "tag": "gpt-oss:20b",
+      "name": "gpt-oss 20B (OpenAI)",
+      "sizeGb": 14,
+      "minRamGb": 24,
+      "type": "text",
+      "tags": [
+        "reasoning",
+        "tools",
+        "agentic",
+        "moe"
+      ],
+      "desc": "OpenAI open-weight MoE; reasoning + agentic tools."
+    },
+    {
+      "tag": "mistral-small3.2:24b",
+      "name": "Mistral Small 3.2 24B",
+      "sizeGb": 15,
+      "minRamGb": 32,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools"
+      ],
+      "desc": "Strong general model + reliable tool calling."
+    },
+    {
+      "tag": "gemma3:27b",
+      "name": "Gemma 3 27B",
+      "sizeGb": 17,
+      "minRamGb": 24,
+      "type": "text",
+      "tags": [
+        "general"
+      ],
+      "desc": "Largest dense Gemma 3; near-frontier general quality."
+    },
+    {
+      "tag": "qwen3.6:27b",
+      "name": "Qwen3.6 27B",
+      "sizeGb": 17,
+      "minRamGb": 32,
+      "type": "text",
+      "tags": [
+        "reasoning",
+        "tools",
+        "agentic"
+      ],
+      "desc": "2026 dense Qwen3.6, thinking-by-default; strong agentic."
+    },
+    {
+      "tag": "command-r:35b",
+      "name": "Cohere Command-R 35B",
+      "sizeGb": 19,
+      "minRamGb": 32,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools",
+        "rag"
+      ],
+      "desc": "Cohere RAG/tool-optimized general model."
+    },
+    {
+      "tag": "qwen3:30b-a3b",
+      "name": "Qwen3 30B-A3B (MoE)",
+      "sizeGb": 19,
+      "minRamGb": 32,
+      "type": "text",
+      "tags": [
+        "reasoning",
+        "tools",
+        "agentic",
+        "fast",
+        "moe"
+      ],
+      "desc": "MoE \u2014 30B quality at ~3B speed, agentic tools."
+    },
+    {
+      "tag": "qwq:32b",
+      "name": "Alibaba QwQ 32B",
+      "sizeGb": 20,
+      "minRamGb": 48,
+      "type": "text",
+      "tags": [
+        "reasoning"
+      ],
+      "desc": "Qwen-series dedicated 32B reasoning model."
+    },
+    {
+      "tag": "deepseek-r1:32b",
+      "name": "DeepSeek-R1 32B",
+      "sizeGb": 20,
+      "minRamGb": 48,
+      "type": "text",
+      "tags": [
+        "reasoning"
+      ],
+      "desc": "Large reasoning distill near frontier."
+    },
+    {
+      "tag": "gemma4:31b",
+      "name": "Gemma 4 31B",
+      "sizeGb": 20,
+      "minRamGb": 32,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools"
+      ],
+      "desc": "Largest dense Gemma 4 (2026)."
+    },
+    {
+      "tag": "qwen3:32b",
+      "name": "Qwen3 32B",
+      "sizeGb": 20,
+      "minRamGb": 48,
+      "type": "text",
+      "tags": [
+        "reasoning",
+        "tools",
+        "agentic"
+      ],
+      "desc": "Large dense reasoning + agentic model."
+    },
+    {
+      "tag": "nemotron-3-nano:30b",
+      "name": "NVIDIA Nemotron-3 Nano 30B-A3B (MoE)",
+      "sizeGb": 24,
+      "minRamGb": 32,
+      "type": "text",
+      "tags": [
+        "reasoning",
+        "tools",
+        "moe",
+        "fast"
+      ],
+      "desc": "Hybrid Mamba-2/MoE, 3.5B active; toggleable reasoning."
+    },
+    {
+      "tag": "qwen3.5:35b",
+      "name": "Qwen3.5 35B",
+      "sizeGb": 24,
+      "minRamGb": 48,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools"
+      ],
+      "desc": "Large dense Qwen3.5 general model (2026)."
+    },
+    {
+      "tag": "qwen3.6:35b-a3b",
+      "name": "Qwen3.6 35B-A3B (MoE)",
+      "sizeGb": 24,
+      "minRamGb": 32,
+      "type": "text",
+      "tags": [
+        "general",
+        "reasoning",
+        "tools",
+        "agentic",
+        "moe"
+      ],
+      "desc": "2026 MoE, thinking-by-default, ~1M context."
+    },
+    {
+      "tag": "deepseek-r1:70b",
+      "name": "DeepSeek-R1 70B (Llama distill)",
+      "sizeGb": 43,
+      "minRamGb": 96,
+      "type": "text",
+      "tags": [
+        "reasoning"
+      ],
+      "desc": "70B Llama-distilled R1; top-tier local reasoning."
+    },
+    {
+      "tag": "llama3.3:70b",
+      "name": "Llama 3.3 70B",
+      "sizeGb": 43,
+      "minRamGb": 96,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools"
+      ],
+      "desc": "Frontier-class dense; needs lots of memory."
+    },
+    {
+      "tag": "qwen3-next:80b-a3b-thinking",
+      "name": "Qwen3-Next 80B-A3B Thinking (MoE)",
+      "sizeGb": 50,
+      "minRamGb": 64,
+      "type": "text",
+      "tags": [
+        "reasoning",
+        "tools",
+        "agentic",
+        "moe"
+      ],
+      "desc": "80B MoE (3B active); dedicated thinking, 256K context."
+    },
+    {
+      "tag": "gpt-oss:120b",
+      "name": "gpt-oss 120B (OpenAI, MoE)",
+      "sizeGb": 65,
+      "minRamGb": 128,
+      "type": "text",
+      "tags": [
+        "reasoning",
+        "tools",
+        "agentic",
+        "moe"
+      ],
+      "desc": "OpenAI open-weight MoE \u2014 frontier reasoning on a Mac."
+    },
+    {
+      "tag": "command-a:111b",
+      "name": "Cohere Command A 111B",
+      "sizeGb": 67,
+      "minRamGb": 128,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools",
+        "rag"
+      ],
+      "desc": "Cohere flagship enterprise model, 256K context."
+    },
+    {
+      "tag": "llama4:scout",
+      "name": "Llama 4 Scout 17B-16E (MoE)",
+      "sizeGb": 67,
+      "minRamGb": 128,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools",
+        "moe"
+      ],
+      "desc": "Meta Llama 4 MoE (16 experts, 17B active); huge context."
+    },
+    {
+      "tag": "mistral-large:123b",
+      "name": "Mistral Large 123B",
+      "sizeGb": 73,
+      "minRamGb": 128,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools"
+      ],
+      "desc": "Mistral's flagship dense open-weights model."
+    },
+    {
+      "tag": "qwen3:235b-a22b",
+      "name": "Qwen3 235B-A22B (MoE)",
+      "sizeGb": 142,
+      "minRamGb": 256,
+      "type": "text",
+      "tags": [
+        "reasoning",
+        "tools",
+        "agentic",
+        "moe"
+      ],
+      "desc": "Frontier open MoE \u2014 targets an M3 Ultra Mac Studio."
+    },
+    {
+      "tag": "llama4:maverick",
+      "name": "Llama 4 Maverick 17B-128E (MoE)",
+      "sizeGb": 245,
+      "minRamGb": 320,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools",
+        "moe"
+      ],
+      "desc": "Meta Llama 4 large MoE (128 experts, 17B active)."
+    },
+    {
+      "tag": "deepseek-v3.1:671b",
+      "name": "DeepSeek V3.1 671B (MoE)",
+      "sizeGb": 404,
+      "minRamGb": 512,
+      "type": "text",
+      "tags": [
+        "general",
+        "tools",
+        "moe"
+      ],
+      "desc": "Flagship MoE chat; hybrid thinking, 160K ctx (512GB machine)."
+    },
+    {
+      "tag": "granite3.2-vision:2b",
+      "name": "IBM Granite 3.2 Vision 2B",
+      "sizeGb": 2,
+      "minRamGb": 8,
+      "type": "vision",
+      "tags": [
+        "vision",
+        "fast"
+      ],
+      "desc": "Compact VLM for documents, tables and charts."
+    },
+    {
+      "tag": "moondream:1.8b",
+      "name": "Moondream 2 (1.8B)",
+      "sizeGb": 2,
+      "minRamGb": 8,
+      "type": "vision",
+      "tags": [
+        "vision",
+        "fast"
+      ],
+      "desc": "Tiny edge VLM for captioning and VQA."
+    },
+    {
+      "tag": "qwen2.5vl:3b",
+      "name": "Qwen2.5-VL 3B",
+      "sizeGb": 3,
+      "minRamGb": 8,
+      "type": "vision",
+      "tags": [
+        "vision",
+        "grounding",
+        "general"
+      ],
+      "desc": "Compact VLM; OCR, docs and bounding-box grounding."
+    },
+    {
+      "tag": "qwen3-vl:4b",
+      "name": "Qwen3-VL 4B",
+      "sizeGb": 3,
+      "minRamGb": 8,
+      "type": "vision",
+      "tags": [
+        "vision",
+        "grounding",
+        "general"
+      ],
+      "desc": "2026 edge VLM, 256K context; strong OCR + grounding."
+    },
+    {
+      "tag": "minicpm-v:8b",
+      "name": "MiniCPM-V 2.6 (8B)",
+      "sizeGb": 6,
+      "minRamGb": 12,
+      "type": "vision",
+      "tags": [
+        "vision",
+        "general"
+      ],
+      "desc": "Efficient 8B VLM; OCR + multi-image/video."
+    },
+    {
+      "tag": "qwen2.5vl:7b",
+      "name": "Qwen2.5-VL 7B",
+      "sizeGb": 6,
+      "minRamGb": 24,
+      "type": "vision",
+      "tags": [
+        "vision",
+        "grounding",
+        "general"
+      ],
+      "desc": "Popular mid VLM; OCR, charts, video, UI grounding."
+    },
+    {
+      "tag": "qwen3-vl:8b",
+      "name": "Qwen3-VL 8B",
+      "sizeGb": 6,
+      "minRamGb": 24,
+      "type": "vision",
+      "tags": [
+        "vision",
+        "grounding",
+        "reasoning"
+      ],
+      "desc": "Most capable modern open VLM in mid class, 256K ctx."
+    },
+    {
+      "tag": "llama3.2-vision:11b",
+      "name": "Llama 3.2 Vision 11B",
+      "sizeGb": 8,
+      "minRamGb": 16,
+      "type": "vision",
+      "tags": [
+        "vision",
+        "general"
+      ],
+      "desc": "Meta instruction-tuned image-reasoning VLM, 128K ctx."
+    },
+    {
+      "tag": "qwen2.5vl:32b",
+      "name": "Qwen2.5-VL 32B",
+      "sizeGb": 21,
+      "minRamGb": 32,
+      "type": "vision",
+      "tags": [
+        "vision",
+        "grounding",
+        "reasoning"
+      ],
+      "desc": "Large Qwen VLM for demanding visual reasoning."
+    },
+    {
+      "tag": "qwen3-vl:32b",
+      "name": "Qwen3-VL 32B",
+      "sizeGb": 21,
+      "minRamGb": 32,
+      "type": "vision",
+      "tags": [
+        "vision",
+        "grounding",
+        "reasoning"
+      ],
+      "desc": "Large 2026 Qwen3-VL; video + agentic grounding."
+    },
+    {
+      "tag": "qwen2.5-coder:1.5b",
+      "name": "Qwen2.5-Coder 1.5B",
+      "sizeGb": 1,
+      "minRamGb": 8,
+      "type": "code",
+      "tags": [
+        "code",
+        "fast"
+      ],
+      "desc": "Tiny code-completion model for IDE autocomplete."
+    },
+    {
+      "tag": "starcoder2:3b",
+      "name": "StarCoder2 3B",
+      "sizeGb": 2,
+      "minRamGb": 8,
+      "type": "code",
+      "tags": [
+        "code",
+        "fast"
+      ],
+      "desc": "BigCode 3B completion model, 17 languages."
+    },
+    {
+      "tag": "qwen2.5-coder:7b",
+      "name": "Qwen2.5-Coder 7B",
+      "sizeGb": 5,
+      "minRamGb": 16,
+      "type": "code",
+      "tags": [
+        "code",
+        "tools",
+        "fast"
+      ],
+      "desc": "Balanced 7B coder; strong fill-in-the-middle."
+    },
+    {
+      "tag": "codegeex4:9b",
+      "name": "CodeGeeX4-ALL 9B",
+      "sizeGb": 6,
+      "minRamGb": 12,
+      "type": "code",
+      "tags": [
+        "code",
+        "tools"
+      ],
+      "desc": "GLM-4-9B based multilingual coder."
+    },
+    {
+      "tag": "hf.co/deepreinforce-ai/Ornith-1.0-9B-GGUF:Q4_K_M",
+      "name": "Ornith 1.0 9B (agentic coder)",
+      "sizeGb": 6,
+      "minRamGb": 16,
+      "type": "code",
+      "tags": [
+        "code",
+        "agentic",
+        "tools",
+        "reasoning"
+      ],
+      "desc": "Agentic-coding specialist (Qwen3.5 base, MIT) \u2014 pulled from HuggingFace."
+    },
+    {
+      "tag": "codellama:13b",
+      "name": "Code Llama 13B (legacy)",
+      "sizeGb": 7,
+      "minRamGb": 12,
+      "type": "code",
+      "tags": [
+        "code"
+      ],
+      "desc": "Meta's legacy Llama-2 code model."
+    },
+    {
+      "tag": "deepseek-coder-v2:16b",
+      "name": "DeepSeek-Coder-V2 Lite 16B",
+      "sizeGb": 9,
+      "minRamGb": 16,
+      "type": "code",
+      "tags": [
+        "code",
+        "moe",
+        "fast"
+      ],
+      "desc": "16B MoE (2.4B active) coder, 160K context."
+    },
+    {
+      "tag": "qwen2.5-coder:14b",
+      "name": "Qwen2.5-Coder 14B",
+      "sizeGb": 9,
+      "minRamGb": 16,
+      "type": "code",
+      "tags": [
+        "code",
+        "tools"
+      ],
+      "desc": "Mid-size Qwen coder; good quality/RAM tradeoff."
+    },
+    {
+      "tag": "starcoder2:15b",
+      "name": "StarCoder2 15B",
+      "sizeGb": 9,
+      "minRamGb": 16,
+      "type": "code",
+      "tags": [
+        "code"
+      ],
+      "desc": "BigCode 15B code model, 600+ languages."
+    },
+    {
+      "tag": "codestral:22b",
+      "name": "Codestral 22B",
+      "sizeGb": 13,
+      "minRamGb": 16,
+      "type": "code",
+      "tags": [
+        "code",
+        "fast"
+      ],
+      "desc": "Mistral 22B code model; 80+ languages, strong FIM."
+    },
+    {
+      "tag": "devstral-small-2:24b",
+      "name": "Devstral Small 2 24B",
+      "sizeGb": 15,
+      "minRamGb": 32,
+      "type": "code",
+      "tags": [
+        "code",
+        "agentic",
+        "tools"
+      ],
+      "desc": "Mistral/All-Hands agentic SWE model, 128K ctx."
+    },
+    {
+      "tag": "qwen3-coder:30b",
+      "name": "Qwen3-Coder 30B-A3B (MoE)",
+      "sizeGb": 19,
+      "minRamGb": 32,
+      "type": "code",
+      "tags": [
+        "code",
+        "agentic",
+        "tools",
+        "fast",
+        "moe"
+      ],
+      "desc": "Agentic coding MoE \u2014 fast, strong tool calling."
+    },
+    {
+      "tag": "qwen2.5-coder:32b",
+      "name": "Qwen2.5-Coder 32B",
+      "sizeGb": 20,
+      "minRamGb": 48,
+      "type": "code",
+      "tags": [
+        "code",
+        "tools"
+      ],
+      "desc": "Flagship dense Qwen2.5 coder; near-frontier code."
+    },
+    {
+      "tag": "qwen3-coder-next:latest",
+      "name": "Qwen3-Coder-Next 80B-A3B (MoE)",
+      "sizeGb": 52,
+      "minRamGb": 64,
+      "type": "code",
+      "tags": [
+        "code",
+        "agentic",
+        "tools",
+        "moe"
+      ],
+      "desc": "80B MoE (3B active), 256K ctx; next-gen agentic coder."
+    },
+    {
+      "tag": "deepseek-coder-v2:236b",
+      "name": "DeepSeek-Coder-V2 236B (MoE)",
+      "sizeGb": 133,
+      "minRamGb": 256,
+      "type": "code",
+      "tags": [
+        "code",
+        "moe",
+        "reasoning"
+      ],
+      "desc": "236B MoE (21B active) coder rivaling closed models."
+    },
+    {
+      "tag": "qwen3-coder:480b",
+      "name": "Qwen3-Coder 480B-A35B (MoE)",
+      "sizeGb": 290,
+      "minRamGb": 384,
+      "type": "code",
+      "tags": [
+        "code",
+        "agentic",
+        "tools",
+        "moe",
+        "reasoning"
+      ],
+      "desc": "Frontier 480B MoE (35B active) for repo-scale agentic work."
+    }
   ]
 }
