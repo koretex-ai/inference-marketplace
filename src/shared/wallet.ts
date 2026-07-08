@@ -61,10 +61,16 @@ export function buildCreditsMessage(nonce: string): string {
   ].join("\n");
 }
 
-/** The human-readable message a provider signs in Phantom to link a Mac to their wallet. */
-export function buildAuthMessage(pairingCode: string, nonce: string): string {
+/**
+ * The human-readable message a provider signs to link a machine to their wallet.
+ * `nodeLabel` (hostname + hardware, self-reported at pair/init) is baked into the signed
+ * text so the approver sees WHICH machine they're authorizing — in Phantom, the embedded
+ * wallet, or the Seeker app's approval sheet.
+ */
+export function buildAuthMessage(pairingCode: string, nonce: string, nodeLabel?: string): string {
   return [
-    "Koretex — authorize this Mac to provide inference under your wallet.",
+    "Koretex — authorize this machine to provide inference under your wallet.",
+    ...(nodeLabel ? [`Node: ${nodeLabel}`] : []),
     `Pairing code: ${pairingCode}`,
     `Nonce: ${nonce}`,
     "",

@@ -1057,15 +1057,42 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
   // ---- Provider pairing (P2): "connect your wallet once" ----------------------
   // Agent starts a pairing; gets a code (for the human) + claimSecret (kept private).
   if (req.method === "POST" && url.pathname === "/provider/pair/init") {
-    const { pairingCode, claimSecret } = pairing.init(Date.now());
-    const proto = (req.headers["x-forwarded-proto"] as string) ?? "http";
-    const connectUrl = `${proto}://${req.headers.host}/connect?code=${pairingCode}`;
-    return json(res, 200, { pairingCode, claimSecret, connectUrl });
+    return readJson(req, res, (b) => {
+      // Optional self-reported node details (hostname/hardware) — shown to the approver so
+      // they can recognize their own machine. Older agents send no body; that still works.
+      const { pairingCode, claimSecret } = pairing.init(Date.now(), {
+        label: b?.label,
+        hardware: b?.hardware,
+      });
+      const proto = (req.headers["x-forwarded-proto"] as string) ?? "http";
+      const connectUrl = `${proto}://${req.headers.host}/connect?code=${pairingCode}`;
+      return json(res, 200, { pairingCode, claimSecret, connectUrl });
+    });
   }
   // The Phantom-connect web page.
   if (req.method === "GET" && url.pathname === "/connect") {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     return res.end(CONNECT_HTML);
+  }
+  // Android App Links: lets the Koretex wallet app (Seeker) claim https://<host>/connect
+  // links, so scanning a pairing QR opens the app's approval sheet instead of the browser.
+  // The fingerprint is the app's RELEASE signing cert (SHA-256); browsers ignore this file.
+  if (req.method === "GET" && url.pathname === "/.well-known/assetlinks.json") {
+    res.writeHead(200, { "content-type": "application/json" });
+    return res.end(
+      JSON.stringify([
+        {
+          relation: ["delegate_permission/common.handle_all_urls"],
+          target: {
+            namespace: "android_app",
+            package_name: "com.koretex.wallet",
+            sha256_cert_fingerprints: [
+              "0A:13:0B:8A:82:54:1A:DB:F1:79:C5:D3:89:FC:67:25:78:D4:A5:8E:33:61:7D:4E:DC:CC:56:EB:12:E7:E8:52",
+            ],
+          },
+        },
+      ]),
+    );
   }
   // Operator admin console — page is public HTML; the data behind it needs the ADMIN_WALLET.
   if (req.method === "GET" && url.pathname === "/admin") {
@@ -1554,11 +1581,12 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     return res.end(AUTH_CALLBACK_HTML);
   }
-  // The page fetches the exact message the wallet must sign for this code.
+  // The approver (web page or Seeker app) fetches the exact message the wallet must sign,
+  // plus the node's self-reported details for the approval UI.
   if (req.method === "GET" && url.pathname === "/provider/pair/message") {
-    const message = pairing.messageFor(url.searchParams.get("code") ?? "");
-    if (!message) return json(res, 404, { error: { message: "unknown or expired pairing code" } });
-    return json(res, 200, { message });
+    const info = pairing.infoFor(url.searchParams.get("code") ?? "");
+    if (!info) return json(res, 404, { error: { message: "unknown or expired pairing code" } });
+    return json(res, 200, { message: info.message, node: info.node });
   }
   // The page submits the wallet's signature; we verify it and mint a token.
   if (req.method === "POST" && url.pathname === "/provider/pair/confirm") {

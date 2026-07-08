@@ -1,10 +1,14 @@
-// `npm run pair` — link this Mac to a Solana wallet (P2, agent-first flow).
-//   1. ask the dispatcher to start a pairing → get a connect link
-//   2. open it; the human connects Phantom and signs (proves wallet ownership)
+// `npm run pair` — link this machine to a Solana wallet (P2, agent-first flow).
+//   1. ask the dispatcher to start a pairing → get a connect link (sent with this machine's
+//      hostname/hardware so the approver can recognize it)
+//   2. approve it on another device: scan the QR with a phone — on a Seeker the Koretex wallet
+//      app opens with an approval sheet; any other phone/browser gets the Phantom/Google page
 //   3. poll until the wallet-bound token is minted, save it, done
-// After this, `npm run agent` registers under that wallet. No wallet secret ever touches the Mac.
+// After this, `npm run agent` registers under that wallet. No wallet secret ever touches this box.
 
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
+import os from "node:os";
+import qrcode from "qrcode-terminal";
 import { saveIdentity, IDENTITY_PATH, loadIdentity } from "./identity.js";
 
 const DISPATCHER_URL = process.env.DISPATCHER_URL ?? "ws://127.0.0.1:8787";
@@ -12,6 +16,19 @@ const DISPATCHER_URL = process.env.DISPATCHER_URL ?? "ws://127.0.0.1:8787";
 const httpBase = DISPATCHER_URL.replace(/^ws/, "http").replace(/\/$/, "");
 const POLL_MS = 2000;
 const TIMEOUT_MS = 10 * 60_000;
+
+/** One-line hardware summary for the approval sheet (chip + memory + OS). Best-effort. */
+function hardwareSummary(): string {
+  const ramGb = Math.round(os.totalmem() / 1024 ** 3);
+  const osName = process.platform === "darwin" ? "macOS" : process.platform === "win32" ? "Windows" : "Linux";
+  let chip = os.cpus()?.[0]?.model ?? "";
+  if (process.platform === "darwin") {
+    try {
+      chip = execFileSync("/usr/sbin/sysctl", ["-n", "machdep.cpu.brand_string"], { encoding: "utf8" }).trim() || chip;
+    } catch {}
+  }
+  return [chip, ramGb ? `${ramGb}GB` : "", osName].filter(Boolean).join(", ");
+}
 
 async function main() {
   const existing = loadIdentity();
@@ -21,19 +38,27 @@ async function main() {
     return;
   }
 
-  const initRes = await fetch(`${httpBase}/provider/pair/init`, { method: "POST" });
+  const initRes = await fetch(`${httpBase}/provider/pair/init`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ label: os.hostname(), hardware: hardwareSummary() }),
+  });
   if (!initRes.ok) throw new Error(`pair/init failed: HTTP ${initRes.status} from ${httpBase}`);
   const init = (await initRes.json()) as { pairingCode: string; claimSecret: string; connectUrl: string };
 
   console.log("\n  Link this machine to your wallet");
   console.log("  ───────────────────────────");
-  console.log("  Open this link in a browser with Phantom and connect your wallet:\n");
+  console.log("  Scan with your phone (Koretex wallet app or camera), or open in a browser:\n");
+  // small=true halves the QR height with half-block characters — fits a normal terminal.
+  qrcode.generate(init.connectUrl, { small: true }, (q: string) => {
+    console.log(q.replace(/^/gm, "    "));
+  });
   console.log(`    ${init.connectUrl}\n`);
   console.log(`  (pairing code ${init.pairingCode})`);
-  console.log("  Waiting for you to sign…  Ctrl-C to cancel.\n");
+  console.log("  Waiting for approval…  Ctrl-C to cancel.\n");
 
-  // Best-effort auto-open of the link (the link is printed above, so headless boxes just open it
-  // on another device): macOS `open`, Linux `xdg-open`, Windows `start`. Harmless if it fails.
+  // Best-effort auto-open of the link (the QR + link cover other devices): macOS `open`,
+  // Linux `xdg-open`, Windows `start`. Harmless if it fails.
   const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
   try { spawn(opener, [init.connectUrl], { stdio: "ignore", detached: true, shell: process.platform === "win32" }).unref(); } catch {}
 
