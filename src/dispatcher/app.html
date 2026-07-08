@@ -525,9 +525,9 @@
       <div class="card">
         <h3>How it works</h3>
         <ol style="padding-left:1.1rem;margin-top:10px;color:var(--ink)">
-          <li>Connect your account — it's your node's identity and where your points accrue.</li>
           <li>Copy the one-line command below and run it in your terminal (see your platform's steps).</li>
-          <li>Your machine auto-starts, serves requests, and earns. Track it on your <a href="#dashboard" class="tablink" data-tab="dashboard">dashboard</a>.</li>
+          <li>Scan the QR it prints with your phone — the Koretex wallet app (Seeker) or this site — and approve. That wallet is where your points accrue.</li>
+          <li>Your machine auto-starts, serves requests, and earns. Track it on your <a href="#dashboard" class="tablink" data-tab="dashboard">dashboard</a> or in the app's Nodes tab.</li>
         </ol>
         <p class="note">Works on: <b>Apple Silicon Mac</b> (16GB+), <b>Linux/Windows + NVIDIA GPU</b>, or CPU-only (slow, low demand). Your account's secret never leaves your device — you only sign a message to prove ownership.</p>
       </div>
@@ -542,15 +542,14 @@
       </div>
 
       <div class="card">
-        <h3>1 · Log in &amp; approve the signature</h3>
-        <p class="note" style="margin:4px 0 12px">Once you <b>Login with Google</b>, approve the one-time wallet signature and your personalised install command appears below. (Use the button if you need to regenerate it.)</p>
-        <button class="btn btn-grad" id="run_enroll" disabled>Log in first</button>
-        <div id="run_out"></div>
-        <div id="run_cmdbox" class="hidden">
-          <p style="margin:14px 0 0;font-weight:600">2 · Run this in your terminal:</p>
-          <div class="codeblock"><code id="run_cmd">—</code><button class="btn btn-ghost btn-sm" id="run_copy" style="background:rgba(43,255,136,.14);color:var(--grn);border-color:rgba(43,255,136,.3)">Copy</button></div>
-          <p class="note">Linked to <span class="addr" id="run_who"></span> — earnings go here. Keep this command private; it contains your node token. This is the <b>macOS / Linux / WSL</b> command — <b>native Windows users: use the PowerShell command in the Windows section below</b>.</p>
-        </div>
+        <h3>1 · Run the installer — same command for everyone</h3>
+        <p class="note" style="margin:4px 0 12px">No login needed first. The command contains no secrets — the installer sets everything up, then prints a <b>QR code</b> so you approve the wallet link yourself.</p>
+        <p style="margin:10px 0 2px;font-weight:600">🍎 macOS / 🐧 Linux / WSL</p>
+        <div class="codeblock"><code id="run_cmd">curl -fsSL https://dispatcher.koretex.ai/install | bash</code><button class="btn btn-ghost btn-sm" id="run_copy" style="background:rgba(43,255,136,.14);color:var(--grn);border-color:rgba(43,255,136,.3)">Copy</button></div>
+        <p style="margin:12px 0 2px;font-weight:600">🪟 Windows (PowerShell, native)</p>
+        <div class="codeblock"><code id="run_cmd_ps">irm https://dispatcher.koretex.ai/install.ps1 | iex</code><button class="btn btn-ghost btn-sm" id="run_copy_ps" style="background:rgba(43,255,136,.14);color:var(--grn);border-color:rgba(43,255,136,.3)">Copy</button></div>
+        <p style="margin:14px 0 0;font-weight:600">2 · Approve on your phone</p>
+        <p class="note">When the installer shows a QR code, scan it — on a <b>Solana Seeker</b> the Koretex wallet app opens an approval sheet showing your machine's name and hardware; from any other phone (or by opening the printed link on this computer) you approve right here in the browser with Google login or Phantom. Your machine then earns to the wallet that approved it.</p>
       </div>
 
       <div class="card">
@@ -567,9 +566,10 @@
         <p class="note">Runs <b>directly on Windows</b> using your NVIDIA GPU — no WSL. Requirements: an <b>NVIDIA GPU with an up-to-date driver</b> (open PowerShell, run <code>nvidia-smi</code> — it should list your card) and <b>Node.js 20+</b> (the installer adds it automatically via <code>winget</code> if it's missing).</p>
         <ol style="padding-left:1.1rem;margin-top:6px;color:var(--ink)" class="note">
           <li>Open <b>PowerShell</b> (press Start, type "PowerShell", Enter). You do <b>not</b> need admin.</li>
-          <li>Paste this <b>PowerShell</b> command (it links to your wallet — keep it private, it contains your node token):
-            <div class="codeblock"><code id="run_cmd_win">— log in above to generate your command —</code><button class="btn btn-ghost btn-sm" id="run_copy_win" style="background:rgba(43,255,136,.14);color:var(--grn);border-color:rgba(43,255,136,.3)">Copy</button></div>
+          <li>Paste this <b>PowerShell</b> command:
+            <div class="codeblock"><code id="run_cmd_win">irm https://dispatcher.koretex.ai/install.ps1 | iex</code><button class="btn btn-ghost btn-sm" id="run_copy_win" style="background:rgba(43,255,136,.14);color:var(--grn);border-color:rgba(43,255,136,.3)">Copy</button></div>
           </li>
+          <li>At the end it prints a <b>QR code</b> — scan it with your phone (Koretex wallet app on Seeker, or any camera) and approve to link your wallet.</li>
           <li>It downloads the CUDA engine (Ollama for Windows), pulls a model, links your wallet, and registers an <b>auto-start task</b> (survives reboot after you log in). When it finishes you'll see <b>✅ Done</b>.</li>
           <li>Control it in a <b>new</b> PowerShell window: <code>koretex status</code> · <code>koretex stop</code> · <code>koretex start</code>.</li>
         </ol>
@@ -1264,42 +1264,17 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
   $("pl_endpoint").addEventListener("click", async (e) => { const b = e.target.closest("button[data-copy]"); if (!b) return; try { await navigator.clipboard.writeText($(b.dataset.copy).textContent); const t = b.textContent; b.textContent = "Copied"; setTimeout(() => { b.textContent = t; }, 1200); } catch {} });
 
   // ===================================================================== RUN A NODE
-  const Run = {
-    async enroll() {
-      const btn = $("run_enroll"); btn.disabled = true; show($("run_out"), "info", "Approve the signature in your account…");
-      try {
-        const ch = await (await fetch("/provider/challenge?for=enroll")).json();
-        const { address: addr, signature } = await W.signMessageBase64(ch.message);
-        const res = await fetch("/provider/enroll", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey: addr, nonce: ch.nonce, signature }) });
-        const d = await res.json();
-        if (!res.ok) throw new Error((d.error && d.error.message) || "Enrollment failed.");
-        $("run_cmd").textContent = `curl -fsSL ${location.origin}/install | DISPATCHER=${location.origin} KORETEX_TOKEN=${d.token} KORETEX_WALLET=${d.address} bash`;
-        // Native-Windows equivalent (PowerShell) for the Windows section — same token/wallet.
-        { const w = $("run_cmd_win"); if (w) w.textContent = `$env:DISPATCHER='${location.origin}'; $env:KORETEX_TOKEN='${d.token}'; $env:KORETEX_WALLET='${d.address}'; irm ${location.origin}/install.ps1 | iex`; }
-        $("run_who").textContent = d.address; $("run_out").innerHTML = "";
-        btn.textContent = "Command generated ✓"; btn.disabled = true;
-        $("run_cmdbox").classList.remove("hidden");
-      } catch (e) { show($("run_out"), "err", (e && e.message) || String(e)); btn.disabled = false; }
-    },
-    onWallet(addr) {
-      const btn = $("run_enroll");
-      if (addr) { btn.disabled = false; btn.textContent = "Generate install command"; }
-      else { btn.disabled = true; btn.textContent = "Log in first"; $("run_cmdbox").classList.add("hidden"); Run._attempted = false; }
-    },
-    // Auto-generate the command the moment a logged-in user lands on this tab, so the button isn't
-    // needed — they just approve the wallet signature. Tried once per session; the button stays as a
-    // manual retry/regenerate fallback (and covers any case where the signature needs a click).
-    _attempted: false,
-    maybeAuto() {
-      if (!address || Run._attempted) return;
-      if (!$("run_cmdbox").classList.contains("hidden")) return; // already generated this session
-      Run._attempted = true;
-      Run.enroll();
-    },
+  // The install command is now UNIVERSAL (no token, no login): the installer prints a QR /
+  // connect link and the wallet link happens at approval time (Seeker app, or the /connect
+  // page in any browser). Nothing to generate here — just copy buttons.
+  const Run = { onWallet() {}, maybeAuto() {} };
+  const wireCopy = (btnId, codeId) => {
+    const b = $(btnId);
+    if (b) b.addEventListener("click", async () => { try { await navigator.clipboard.writeText($(codeId).textContent); b.textContent = "Copied"; setTimeout(() => { b.textContent = "Copy"; }, 1200); } catch {} });
   };
-  $("run_enroll").addEventListener("click", () => Run.enroll());
-  $("run_copy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("run_cmd").textContent); $("run_copy").textContent = "Copied"; } catch {} });
-  $("run_copy_win").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("run_cmd_win").textContent); $("run_copy_win").textContent = "Copied"; } catch {} });
+  wireCopy("run_copy", "run_cmd");
+  wireCopy("run_copy_ps", "run_cmd_ps");
+  wireCopy("run_copy_win", "run_cmd_win");
 
   // ===================================================================== POINTS ESTIMATOR
   const Calc = {

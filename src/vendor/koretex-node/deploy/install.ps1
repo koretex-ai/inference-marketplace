@@ -194,12 +194,17 @@ $env:KORETEX_DISPATCHER = $DISPATCHER
 if (-not [string]::IsNullOrEmpty($env:KORETEX_TOKEN)) {
   "{`"token`":`"$($env:KORETEX_TOKEN)`",`"address`":`"$(Get-EnvOr 'KORETEX_WALLET' '')`"}" | Set-Content -Path (Join-Path $KDIR "node.json") -Encoding ASCII
   Write-Host "  Linked via your website wallet connection."
-} else {
-  # Native Windows is always headless from the agent's perspective (no interactive Phantom flow here) -
-  # self-custody enroll: generate a local wallet + mint the node token and a customer key for this
-  # machine's own inference. The secret stays in $KDIR\wallet.json.
+} elseif ($env:KORETEX_ENROLL -eq '1' -or -not [Environment]::UserInteractive) {
+  # Headless (unattended installs / the Hermes provider skill): self-custody enroll - generate a
+  # local wallet + mint the node token and a customer key for this machine's own inference.
+  # The secret stays in $KDIR\wallet.json.
   Write-Host "  Linking with a self-custody wallet (headless)..."
   & $NodeBin $AGENT enroll
+} else {
+  # Interactive: scan-to-approve pairing. Prints a QR of the connect link - scan it with the
+  # Koretex wallet app (Seeker) or any phone camera, or open the link in a browser, and approve.
+  Write-Host "  Link this machine to your wallet - scan the QR below with your phone..."
+  & $NodeBin $AGENT pair
 }
 
 # --- 5. Auto-start on login ---------------------------------------------------

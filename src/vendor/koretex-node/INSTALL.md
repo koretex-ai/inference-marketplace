@@ -15,17 +15,18 @@ model that fits, links your wallet, and sets up auto-start (launchd on macOS, sy
 curl -fsSL https://dispatcher.koretex.ai/install | bash
 ```
 
-> Get your personalised command (with your wallet token) from the **Run a node** tab on the
-> dashboard. It looks like:
-> `curl -fsSL https://dispatcher.koretex.ai/install | KORETEX_TOKEN=… KORETEX_WALLET=… bash`
+> The same command works for everyone — it contains no secrets. At the end the installer prints
+> a **QR code**: scan it with the Koretex wallet app (Solana Seeker) for a native approval sheet,
+> or with any phone camera / open the printed link in a browser to approve with Phantom or
+> Google login. The wallet that approves is the wallet your node earns to.
 
 ---
 
 ## macOS (Apple Silicon)
 
-1. Get your install command: dashboard → **Run a node** → **Login with Google** → copy the one-liner.
-2. Open **Terminal** (⌘-Space, type "Terminal", Enter).
-3. Paste the command, press Enter.
+1. Open **Terminal** (⌘-Space, type "Terminal", Enter).
+2. Paste the install command above, press Enter.
+3. When the QR appears, scan it with your phone and approve to link your wallet.
 
 The installer does everything — engine, model, wallet link, auto-start via launchd (survives reboot
 and respawns on crash). If it stops asking for **Node.js**, install it once from
@@ -71,11 +72,11 @@ or GeForce Experience) — that's what exposes the GPU to WSL. No driver is inst
    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs
    ```
 
-6. **Get your install command:** dashboard → **Run a node** → **Login with Google** → approve the
-   signature → copy the one-line command (it carries your wallet token).
+6. **Paste the install command into the Ubuntu window** and press Enter. It installs the engine,
+   pulls a model, and starts the node as a systemd **system service** (survives logout).
 
-7. **Paste it into the Ubuntu window** and press Enter. It installs the engine, pulls a model, links
-   your wallet, and starts the node as a systemd **system service** (survives logout).
+7. **Scan the QR it prints** with your phone (Koretex wallet app or camera) and approve — that
+   links the node to your wallet.
 
 To also survive a full Windows **reboot**, see [Keeping your node running](#keeping-your-node-running).
 
