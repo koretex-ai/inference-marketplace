@@ -179,9 +179,11 @@ that is the **M5** trust problem (confidential inference) — out of scope here;
   preflight → Node → Ollama + model → download agent bundle → **wallet pairing (P2)** → launchd.
 - [x] **Served same-origin off the dispatcher** — `/install`, `/preflight`, `/agent.js` (bundle built
   in the Docker image). No new hosting/infra; matches the `/connect` approach.
-- [x] **Website-first funnel** — `/provider` landing (and site front door `/`): connect Phantom →
-  get a personalized one-liner with the node token baked in (`KORETEX_TOKEN=…`), so the install
-  runs with no second signing step. The discovery path that turns a visitor into a node.
+- [x] **Website-first funnel** — `/provider` landing (and site front door `/`): one universal
+  token-free command (`curl -fsSL …/install | bash`); the installer prints a QR / connect link
+  and the wallet link happens at approval time (Seeker app via App Links, or `/connect` in a
+  browser with Phantom/Google). Superseded the earlier per-user `KORETEX_TOKEN=…` one-liner,
+  which remains supported for scripted installs.
 - [x] **Hardware-aware model picker** — curated catalog (`deploy/models.json`) served at
   `/models/catalog`; preflight lists the models this Mac can run, and the installer filters by
   actual RAM + free disk and lets the provider **choose** which to serve (or `KORETEX_MODEL=…`).
