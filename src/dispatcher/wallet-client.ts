@@ -51,6 +51,12 @@ export interface SignedMessage {
 export const KoretexWallet = {
   AddressType,
 
+  /** Render text as a QR data-URL (used by the dashboard's phone sign-in). */
+  async qrDataUrl(text: string): Promise<string> {
+    const QRCode = await import("qrcode");
+    return QRCode.toDataURL(text, { width: 240, margin: 1 });
+  },
+
   /**
    * Resume any existing session (7-day embedded session, or a trusted extension), and on the
    * /auth/callback page finish the Google OAuth round-trip. Resolves to the Solana address or

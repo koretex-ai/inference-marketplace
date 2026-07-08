@@ -262,7 +262,17 @@
       <span class="eyebrow">Your account</span>
       <h1>Dashboard</h1>
       <p class="sub">Your nodes, earnings, and Koretex Points — for the account you connect.</p>
-      <div id="dashGate" class="gate card"><p>Log in to see your dashboard.</p><button class="btn btn-grad connect-cta">Login with Google</button></div>
+      <div id="dashGate" class="gate card">
+        <p>Log in to see your dashboard.</p>
+        <button class="btn btn-grad connect-cta">Login with Google</button>
+        <button class="btn btn-ghost" id="qrLoginBtn" style="margin-left:8px">📱 Sign in with your phone</button>
+        <div id="qrLoginBox" class="hidden" style="margin-top:14px">
+          <img id="qrLoginImg" alt="Scan with the Koretex wallet app" width="240" height="240" style="border-radius:8px;background:#fff;padding:6px" />
+          <p class="note" style="margin-top:8px">Scan with the <b>Koretex wallet app</b> (Solana Seeker) and approve.
+            Code: <code id="qrLoginCode"></code> — check it matches your phone.</p>
+          <div id="qrLoginOut"></div>
+        </div>
+      </div>
       <div id="dashBody" class="hidden">
         <div class="cards">
           <div class="stat"><div class="n" id="d_jobs">—</div><div class="l">jobs served</div></div>
@@ -1275,6 +1285,40 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
   wireCopy("run_copy", "run_cmd");
   wireCopy("run_copy_ps", "run_cmd_ps");
   wireCopy("run_copy_win", "run_cmd_win");
+
+  // ===================================================================== QR SIGN-IN
+  // Dashboard access for wallets that live on a phone (Seeker app): show a QR, the phone
+  // signs, we collect a read-only session and boot the same #kx= path `koretex dashboard` uses.
+  const QrLogin = {
+    timer: null,
+    async start() {
+      const btn = $("qrLoginBtn"); btn.disabled = true;
+      try {
+        const d = await (await fetch("/auth/qr/init", { method: "POST" })).json();
+        $("qrLoginImg").src = await W.qrDataUrl(d.connectUrl);
+        $("qrLoginCode").textContent = d.loginCode.replace(/^LOGIN-/, "");
+        $("qrLoginBox").classList.remove("hidden");
+        show($("qrLoginOut"), "info", "Waiting for your phone…");
+        const deadline = Date.now() + 5 * 60_000;
+        clearInterval(QrLogin.timer);
+        QrLogin.timer = setInterval(async () => {
+          if (Date.now() > deadline) { clearInterval(QrLogin.timer); btn.disabled = false; show($("qrLoginOut"), "err", "Code expired — try again."); return; }
+          try {
+            const p = await (await fetch(`/auth/qr/poll?code=${encodeURIComponent(d.loginCode)}&secret=${encodeURIComponent(d.claimSecret)}`)).json();
+            if (p.status === "ready") {
+              clearInterval(QrLogin.timer);
+              const payload = btoa(JSON.stringify({ pubkey: p.pubkey, session: p.session, exp: p.expiresAt }))
+                .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+              location.hash = "kx=" + payload; // hashchange listener bootstraps the session
+            } else if (p.status === "error") {
+              clearInterval(QrLogin.timer); btn.disabled = false; show($("qrLoginOut"), "err", p.error);
+            }
+          } catch {}
+        }, 2000);
+      } catch (e) { btn.disabled = false; show($("qrLoginOut"), "err", (e && e.message) || String(e)); }
+    },
+  };
+  $("qrLoginBtn").addEventListener("click", () => QrLogin.start());
 
   // ===================================================================== POINTS ESTIMATOR
   const Calc = {

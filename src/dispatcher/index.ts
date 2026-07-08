@@ -35,6 +35,7 @@ import { Pricing, type PriceBook } from "../shared/pricing.js";
 import { SolanaVerifier, USDC_MINT_MAINNET } from "../shared/solana.js";
 import { StripePayments } from "../shared/stripe.js";
 import { Pairing } from "./pairing.js";
+import { QrLogin } from "./qr-login.js";
 import { Challenges } from "./challenge.js";
 import { Sessions } from "./sessions.js";
 import {
@@ -197,6 +198,8 @@ const providerStore: ProviderStore = process.env.DATABASE_URL
   ? new PostgresProviderStore(process.env.DATABASE_URL)
   : new InMemoryProviderStore();
 const pairing = new Pairing(providerStore);
+// QR sign-in mints the same read-only dashboard sessions `koretex dashboard` uses.
+const qrLogin = new QrLogin((pubkey, now) => sessions.issue(pubkey, now));
 
 // Credit purchases (M4 money-in). Durable when DATABASE_URL is set; in-memory otherwise.
 const creditStore: CreditStore = process.env.DATABASE_URL
@@ -1605,6 +1608,41 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
       res,
       200,
       pairing.poll(url.searchParams.get("code") ?? "", url.searchParams.get("secret") ?? ""),
+    );
+  }
+
+  // ---- QR sign-in: dashboard in this browser, wallet on a phone (Seeker app) -------------
+  // Same shape as pairing, but approval mints a read-only dashboard SESSION, not a node token.
+  if (req.method === "POST" && url.pathname === "/auth/qr/init") {
+    const { loginCode, claimSecret } = qrLogin.init(Date.now());
+    const proto = (req.headers["x-forwarded-proto"] as string) ?? "http";
+    const connectUrl = `${proto}://${req.headers.host}/connect?login=${loginCode}`;
+    return json(res, 200, { loginCode, claimSecret, connectUrl });
+  }
+  // The phone fetches the exact message to sign for this login code.
+  if (req.method === "GET" && url.pathname === "/auth/qr/message") {
+    const message = qrLogin.messageFor(url.searchParams.get("code") ?? "");
+    if (!message) return json(res, 404, { error: { message: "unknown or expired login code" } });
+    return json(res, 200, { message });
+  }
+  // The phone submits the wallet's signature; we verify and park a session on the code.
+  if (req.method === "POST" && url.pathname === "/auth/qr/approve") {
+    return readJson(req, res, (b) => {
+      const r = qrLogin.approve(
+        String(b.loginCode ?? b.code ?? ""),
+        String(b.pubkey ?? ""),
+        String(b.signature ?? ""),
+        Date.now(),
+      );
+      return json(res, r.ok ? 200 : 400, r);
+    });
+  }
+  // The browser polls (with its claimSecret) until the session is ready.
+  if (req.method === "GET" && url.pathname === "/auth/qr/poll") {
+    return json(
+      res,
+      200,
+      qrLogin.poll(url.searchParams.get("code") ?? "", url.searchParams.get("secret") ?? ""),
     );
   }
 

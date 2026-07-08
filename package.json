@@ -20,6 +20,7 @@
     "@solana/web3.js": "^1.98.4",
     "bs58": "^6.0.0",
     "pg": "^8.13.1",
+    "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "stripe": "^22.3.0",
     "tweetnacl": "^1.0.3",
@@ -28,6 +29,7 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/pg": "^8.11.10",
+    "@types/qrcode": "^1.5.6",
     "@types/ws": "^8.5.13",
     "esbuild": "^0.28.1",
     "tsx": "^4.19.2",

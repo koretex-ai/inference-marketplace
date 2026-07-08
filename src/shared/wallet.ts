@@ -79,6 +79,20 @@ export function buildAuthMessage(pairingCode: string, nonce: string, nodeLabel?:
 }
 
 /**
+ * Message signed on a PHONE to open the dashboard on another device (QR sign-in).
+ * The code is displayed on both screens so the user can match them.
+ */
+export function buildQrLoginMessage(loginCode: string, nonce: string): string {
+  return [
+    "Koretex — sign in to your dashboard on another device.",
+    `Login code: ${loginCode}`,
+    `Nonce: ${nonce}`,
+    "",
+    "Signing only proves you own this wallet so the other screen can show your stats. No transaction.",
+  ].join("\n");
+}
+
+/**
  * Verify a Phantom-style signMessage signature.
  * @param pubkeyBase58   the wallet address (base58), as Phantom returns it
  * @param message        the exact UTF-8 string that was signed
