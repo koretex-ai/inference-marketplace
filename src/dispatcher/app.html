@@ -241,6 +241,7 @@
     <div class="walletbar">
       <span class="waddr hidden" id="waddr"></span>
       <button class="btn btn-ghost btn-sm hidden" id="disconnectBtn">Sign out</button>
+      <button class="btn btn-ghost" id="phoneLoginBtn" title="Scan a QR with the Koretex wallet app (Solana Seeker)">📱 Phone</button>
       <button class="btn btn-grad" id="connectBtn">Login with Google</button>
     </div>
   </nav>
@@ -722,6 +723,7 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
     address = addr;
     const connected = !!addr;
     $("connectBtn").classList.toggle("hidden", connected);
+    $("phoneLoginBtn").classList.toggle("hidden", connected);
     $("waddr").classList.toggle("hidden", !connected);
     $("disconnectBtn").classList.toggle("hidden", !connected);
     if (connected) $("waddr").innerHTML = '<i></i>' + addr.slice(0, 5) + "…" + addr.slice(-4);
@@ -1319,6 +1321,8 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
     },
   };
   $("qrLoginBtn").addEventListener("click", () => QrLogin.start());
+  // Nav variant: jump to the Dashboard tab (where the QR renders on the gate) and start.
+  $("phoneLoginBtn").addEventListener("click", () => { selectTab("dashboard", true); QrLogin.start(); });
 
   // ===================================================================== POINTS ESTIMATOR
   const Calc = {
