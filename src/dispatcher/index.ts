@@ -34,6 +34,9 @@ import { PostgresModelPricing } from "../shared/model-pricing-postgres.js";
 import { Pricing, type PriceBook } from "../shared/pricing.js";
 import { SolanaVerifier, USDC_MINT_MAINNET } from "../shared/solana.js";
 import { StripePayments } from "../shared/stripe.js";
+import { MemoryAeoStore, type AeoStore } from "../shared/aeo-store.js";
+import { PostgresAeoStore } from "../shared/aeo-store-postgres.js";
+import { crawlSite, generateAeoReport, normalizeSiteUrl, type AeoReport } from "./aeo-review.js";
 import { Pairing } from "./pairing.js";
 import { QrLogin } from "./qr-login.js";
 import { Challenges } from "./challenge.js";
@@ -104,6 +107,16 @@ const RPC_PROXY_METHODS = new Set([
   "getTokenAccountsByOwner", "sendTransaction", "getSignatureStatuses",
   "getFeeForMessage", "getMinimumBalanceForRentExemption", "getParsedTransaction",
 ]);
+
+// ---- AEO/SEO review (free-with-login, one site per wallet) ----------------------------------
+// OpenRouter key for the report-generating model. Secret — server-side only, same handling as
+// the Helius key. Unset = the review feature returns "not configured".
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "";
+// Which OpenRouter model writes the report. Open-weight by policy; DeepSeek V4 is the current
+// price/quality sweet spot for structured analysis. Override per-env without a deploy.
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL ?? "deepseek/deepseek-v4-pro";
+// Regeneration ceiling per wallet per day (same site only — a different site is refused outright).
+const AEO_RUNS_PER_DAY = Number(process.env.AEO_RUNS_PER_DAY ?? 3);
 
 /** Credits issued for a USDC amount (base units, 6 decimals), floored. */
 function creditsFor(usdcRaw: number): number {
@@ -220,6 +233,60 @@ const stripe = new StripePayments({ secretKey: STRIPE_SECRET_KEY, webhookSecret:
 const customerStore: CustomerStore = process.env.DATABASE_URL
   ? new PostgresCustomerStore(process.env.DATABASE_URL)
   : new InMemoryCustomerStore();
+
+// AEO/SEO review records — one free site review per wallet. Durable when DATABASE_URL is set
+// (a redeploy must not re-grant free reports); in-memory otherwise.
+const aeoStore: AeoStore = process.env.DATABASE_URL
+  ? new PostgresAeoStore(process.env.DATABASE_URL)
+  : new MemoryAeoStore();
+
+// In-flight review jobs (crawl + model call runs ~30-90s, so the POST returns a job id and the
+// page polls). In-memory on purpose: a job is bound to one browser session; a dispatcher restart
+// just means re-running it. Finished reports persist in aeoStore, not here.
+interface AeoJob {
+  id: string;
+  wallet: string;
+  url: string;
+  site: string;
+  status: "crawling" | "analyzing" | "done" | "error";
+  phase: string;
+  pagesFetched: number;
+  report?: AeoReport;
+  error?: string;
+  startedAt: number;
+}
+const aeoJobs = new Map<string, AeoJob>();
+// Per-wallet run timestamps for the daily regeneration cap (in-memory; the cap is a courtesy
+// guard on OpenRouter spend, not a billing invariant).
+const aeoRuns = new Map<string, number[]>();
+const AEO_JOB_TTL_MS = 30 * 60_000;
+setInterval(() => {
+  const cutoff = Date.now() - AEO_JOB_TTL_MS;
+  for (const [id, j] of aeoJobs) if (j.startedAt < cutoff) aeoJobs.delete(id);
+}, 60_000).unref();
+
+/** Run one review job to completion (fire-and-forget from the route; status lives on the job). */
+async function runAeoJob(job: AeoJob): Promise<void> {
+  try {
+    const signals = await crawlSite(job.url, (phase, n) => { job.phase = phase; job.pagesFetched = n; });
+    job.status = "analyzing";
+    job.phase = "generating report";
+    const { report, model } = await generateAeoReport(signals, { apiKey: OPENROUTER_API_KEY, model: OPENROUTER_MODEL });
+    const now = Date.now();
+    const existing = await aeoStore.forWallet(job.wallet);
+    await aeoStore.save({
+      wallet: job.wallet, site: job.site, url: job.url, report, model,
+      createdAt: existing?.createdAt ?? now, updatedAt: now,
+    });
+    job.report = report;
+    job.status = "done";
+    job.phase = "done";
+  } catch (e: any) {
+    job.status = "error";
+    job.error = String(e?.message ?? e);
+    console.error(`[aeo] job ${job.id} (${job.site}) failed:`, job.error);
+  }
+}
 
 // Points & reputation event log (R0). Durable when DATABASE_URL is set. Records the same job
 // completions the ledger does (demand signal) plus, later, synthetic-challenge results (R1).
@@ -369,7 +436,7 @@ async function ensureWelcomeCredits(wallet: string): Promise<void> {
 // The unified app — one tabbed page that replaces the standalone dashboard/credits/models/
 // leaderboard/points/provider pages. It picks the active tab from the path/hash.
 const APP_HTML = readFileSync(new URL("./app.html", import.meta.url), "utf8");
-const APP_PATHS = new Set(["/", "/dashboard", "/credits", "/models", "/demand", "/leaderboard", "/points", "/provider"]);
+const APP_PATHS = new Set(["/", "/dashboard", "/credits", "/models", "/demand", "/leaderboard", "/points", "/provider", "/aeo-seo-review"]);
 const CONNECT_HTML = readFileSync(new URL("./connect.html", import.meta.url), "utf8");
 const ADMIN_HTML = readFileSync(new URL("./admin.html", import.meta.url), "utf8");
 const AUTH_CALLBACK_HTML = readFileSync(new URL("./auth-callback.html", import.meta.url), "utf8");
@@ -1025,7 +1092,9 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
   // Unified tabbed app — serves every user-facing surface (dashboard, credits, models, leaderboard,
   // points, run-a-node). The app selects the tab from the path/hash. JSON + machine routes
   // (/leaderboard/data, /models/live, /connect, /admin) are exact-matched separately below.
-  if (req.method === "GET" && APP_PATHS.has(url.pathname)) {
+  // /aeo-seo-review/<site> is the public share link for a generated report (e.g.
+  // /aeo-seo-review/example.com) — same app shell; the client reads the slug and loads the report.
+  if (req.method === "GET" && (APP_PATHS.has(url.pathname) || url.pathname.startsWith("/aeo-seo-review/"))) {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     return res.end(APP_HTML);
   }
@@ -1511,6 +1580,76 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
     });
   }
 
+  // ---- AEO/SEO review ------------------------------------------------------------------------
+  // Start a review (wallet-gated). Free tier: each wallet gets ONE site — the first completed
+  // report locks the wallet to that host; the same host may be re-run (capped/day), any other
+  // host is refused until credits-based reviews exist.
+  if (req.method === "POST" && url.pathname === "/aeo/review") {
+    return readJson(req, res, async (b) => {
+      const pubkey = authCreditsWallet(res, b);
+      if (!pubkey) return;
+      if (!OPENROUTER_API_KEY)
+        return json(res, 503, { error: { message: "site review isn't configured on this server yet" } });
+      let target: URL;
+      try { target = normalizeSiteUrl(String(b.url ?? "")); }
+      catch (e: any) { return json(res, 400, { error: { message: e.message } }); }
+      const site = target.hostname.replace(/^www\./, "");
+      const existing = await aeoStore.forWallet(pubkey);
+      if (existing && existing.site !== site)
+        return json(res, 403, { error: { message: `your free review is already used for ${existing.site} — you can re-run that site, but reviewing a second site isn't available yet`, lockedSite: existing.site } });
+      const runs = (aeoRuns.get(pubkey) ?? []).filter((t) => t > Date.now() - 86_400_000);
+      if (runs.length >= AEO_RUNS_PER_DAY)
+        return json(res, 429, { error: { message: `daily limit reached (${AEO_RUNS_PER_DAY} runs) — try again tomorrow` } });
+      // One in-flight job per wallet — a second submit re-attaches to the running one.
+      for (const j of aeoJobs.values()) {
+        if (j.wallet === pubkey && (j.status === "crawling" || j.status === "analyzing"))
+          return json(res, 200, { jobId: j.id, site: j.site, resumed: true });
+      }
+      runs.push(Date.now());
+      aeoRuns.set(pubkey, runs);
+      const job: AeoJob = {
+        id: randomUUID(), wallet: pubkey, url: target.href, site,
+        status: "crawling", phase: "starting", pagesFetched: 0, startedAt: Date.now(),
+      };
+      aeoJobs.set(job.id, job);
+      void runAeoJob(job);
+      return json(res, 200, { jobId: job.id, site });
+    });
+  }
+  // Poll a review job. The id is an unguessable UUID minted for this browser session.
+  if (req.method === "GET" && url.pathname === "/aeo/review/status") {
+    const job = aeoJobs.get(url.searchParams.get("id") ?? "");
+    if (!job) return json(res, 404, { error: { message: "unknown or expired job — start the review again" } });
+    return json(res, 200, {
+      status: job.status, phase: job.phase, pagesFetched: job.pagesFetched,
+      site: job.site, report: job.status === "done" ? job.report : undefined,
+      error: job.status === "error" ? job.error : undefined,
+    });
+  }
+  // Public share-link read: the saved report for a site host. Deliberately login-free — reports
+  // contain nothing private (they audit a public website) and shareable links are the point
+  // (case studies, examples). Freshest report wins if several wallets reviewed the same site.
+  if (req.method === "GET" && url.pathname === "/aeo/shared") {
+    const site = String(url.searchParams.get("site") ?? "").toLowerCase().replace(/^www\./, "").trim();
+    aeoStore.bySite(site).then(
+      (rec) => rec
+        ? json(res, 200, { report: rec.report, site: rec.site, url: rec.url, model: rec.model, updatedAt: rec.updatedAt })
+        : json(res, 404, { error: { message: "no report exists for that site yet" } }),
+      (e) => json(res, 500, { error: { message: String(e?.message ?? e) } }),
+    );
+    return;
+  }
+  // The wallet's saved report (wallet-gated) — so returning users see their report instantly.
+  if (req.method === "POST" && url.pathname === "/aeo/report") {
+    return readJson(req, res, async (b) => {
+      const pubkey = authCreditsWallet(res, b);
+      if (!pubkey) return;
+      const rec = await aeoStore.forWallet(pubkey);
+      if (!rec) return json(res, 200, { report: null });
+      return json(res, 200, { report: rec.report, site: rec.site, url: rec.url, model: rec.model, updatedAt: rec.updatedAt });
+    });
+  }
+
   // Model catalog. Plain JSON for the web; ?format=text&ram=&disk= → fitting models for the installer.
   if (req.method === "GET" && url.pathname === "/models/catalog") {
     // Cross-platform model-fit: gate on the memory the ENGINE can actually use — unified memory
@@ -1782,6 +1921,7 @@ async function start() {
   if (creditStore.init) await creditStore.init();
   if (customerStore.init) await customerStore.init();
   if (points.init) await points.init();
+  if (aeoStore.init) await aeoStore.init();
   if (modelPricing.init) await modelPricing.init();
   // Load admin price overrides into the live Pricing book so they apply without a redeploy.
   try {
