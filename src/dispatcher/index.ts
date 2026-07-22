@@ -273,6 +273,15 @@ const aeoJobs = new Map<string, AeoJob>();
 // OpenRouter spend, not a billing invariant).
 const aeoRuns = new Map<string, number[]>();
 const aeoIpRuns = new Map<string, number[]>();
+// Browser-level cap: the first review sets an HttpOnly cookie, and from then on that BROWSER is
+// held to the same one-site + runs/day limits no matter what email is typed — closing the
+// "new made-up email each run" hole. In-memory (a restart forgives it); IP cap is the backstop.
+const aeoCookieState = new Map<string, { site: string; runs: number[] }>();
+const AEO_COOKIE = "kx_aeo_id";
+function aeoCookieId(req: http.IncomingMessage): string | null {
+  const m = (req.headers.cookie ?? "").match(new RegExp(`(?:^|;\\s*)${AEO_COOKIE}=([A-Za-z0-9-]{8,})`));
+  return m ? m[1] : null;
+}
 const AEO_JOB_TTL_MS = 30 * 60_000;
 setInterval(() => {
   const cutoff = Date.now() - AEO_JOB_TTL_MS;
@@ -1645,6 +1654,23 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
       const runs = (aeoRuns.get(email) ?? []).filter((t) => t > now - 86_400_000);
       if (!unlimited && runs.length >= AEO_RUNS_PER_DAY)
         return json(res, 429, { error: { message: `daily limit reached (${AEO_RUNS_PER_DAY} runs) — try again tomorrow` } });
+      // Browser cookie cap: the same limits keyed on the browser, so switching emails doesn't
+      // reset them. Mint the cookie on a browser's first run.
+      let cookieId = aeoCookieId(req);
+      if (!unlimited) {
+        const cs = cookieId ? aeoCookieState.get(cookieId) : undefined;
+        if (cs) {
+          cs.runs = cs.runs.filter((t) => t > now - 86_400_000);
+          if (cs.site !== site)
+            return json(res, 403, { error: { message: `this browser's free review is already used for ${cs.site} — re-running that site is fine, a second site isn't`, lockedSite: cs.site } });
+          if (cs.runs.length >= AEO_RUNS_PER_DAY)
+            return json(res, 429, { error: { message: `daily limit reached (${AEO_RUNS_PER_DAY} runs) — try again tomorrow` } });
+        }
+      }
+      if (!cookieId) {
+        cookieId = randomUUID();
+        res.setHeader("set-cookie", `${AEO_COOKIE}=${cookieId}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax`);
+      }
       // Per-IP throttle: emails are self-reported, so the IP cap is what actually bounds spend.
       const ip = String(req.headers["x-forwarded-for"] ?? "").split(",")[0].trim() || req.socket.remoteAddress || "?";
       const ipRuns = (aeoIpRuns.get(ip) ?? []).filter((t) => t > now - 3_600_000);
@@ -1661,6 +1687,12 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
       aeoRuns.set(email, runs);
       ipRuns.push(now);
       aeoIpRuns.set(ip, ipRuns);
+      if (!unlimited && cookieId) {
+        const cs = aeoCookieState.get(cookieId) ?? { site, runs: [] };
+        cs.site = site;
+        cs.runs.push(now);
+        aeoCookieState.set(cookieId, cs);
+      }
       const job: AeoJob = {
         id: randomUUID(), owner: email, url: target.href, site,
         status: "crawling", phase: "starting", pagesFetched: 0, startedAt: now,
