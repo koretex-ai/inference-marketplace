@@ -61,11 +61,33 @@ export interface PageSignals {
   fetchedAtMs: number;
 }
 
+/** Outcome of the Google Maps / Business Profile lookup (Places API). `checked` false means we
+ *  could not ask Google (no key, or the API errored) — distinct from "asked and found nothing". */
+export interface PlacesResult {
+  checked: boolean;
+  query?: string;
+  found: boolean;
+  /** Matching is strict: a candidate counts only if its listed website is the audited domain. */
+  name?: string;
+  rating?: number;
+  reviews?: number;
+  address?: string;
+  businessStatus?: string;
+  mapsUrl?: string;
+  /** Listings with a similar name that do NOT link the audited domain (0 = none at all). */
+  nearMisses?: number;
+  error?: string;
+}
+
 export interface SiteSignals {
   inputUrl: string;
   finalUrl: string;               // after redirects (www/https normalization)
   host: string;
   https: boolean;
+  /** Business/site name as the site presents it (og:site_name → schema.org → <title>). */
+  siteName: string | null;
+  /** Google Maps listing lookup — filled in by the caller when a Places API key is configured. */
+  googlePlaces: PlacesResult;
   robotsTxt: {
     found: boolean;
     sitemapUrls: string[];
@@ -265,6 +287,70 @@ export function extractPageSignals(url: string, status: number, html: string): P
   };
 }
 
+/** The business/site name as the site itself declares it — used as the Google Maps search query. */
+function extractSiteName(html: string, host: string): string | null {
+  const head = html.slice(0, 300_000);
+  const og = metaContent(head, "property", "og:site_name");
+  if (og) return og;
+  // schema.org Organization / LocalBusiness-ish name (crude but dependency-free).
+  const ld = html.match(/"@type"\s*:\s*"(?:Organization|Corporation|LocalBusiness[^"]*|Store|Restaurant|ProfessionalService)"[^{}]*?"name"\s*:\s*"([^"]+)"/);
+  if (ld?.[1]) return decode(ld[1]);
+  const title = head.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (title) {
+    // "Page — Brand" / "Brand | tagline": take the segment that isn't generic page words.
+    const parts = decode(strip(title[1])).split(/\s*[|–—·/\\-]\s+/).filter(Boolean);
+    if (parts.length) return parts.length > 1 ? parts[parts.length - 1] : parts[0];
+  }
+  return host.replace(/^www\./, "").split(".")[0] || null;
+}
+
+// ---- Google Maps / Business Profile lookup (Places API "New" text search) ---------------------
+// One POST per review. Matching is strict: a candidate only counts as THE business if the
+// website on its listing points at the audited domain — a name-only match could be a different
+// company, and mis-attributing a listing is worse than saying "not found". Failures degrade to
+// checked:false so a Places outage can never sink a report.
+
+export async function lookupGooglePlaces(siteName: string | null, host: string, apiKey: string): Promise<PlacesResult> {
+  if (!apiKey) return { checked: false, found: false };
+  const query = siteName || host;
+  try {
+    const r = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-goog-api-key": apiKey,
+        "x-goog-fieldmask": "places.displayName,places.rating,places.userRatingCount,places.formattedAddress,places.businessStatus,places.websiteUri,places.googleMapsUri",
+      },
+      body: JSON.stringify({ textQuery: query, pageSize: 10 }),
+    });
+    const d: any = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(d?.error?.message ?? `Places API returned HTTP ${r.status}`);
+    const places: any[] = d?.places ?? [];
+    const norm = (h: string) => h.toLowerCase().replace(/^www\./, "");
+    const target = norm(host);
+    const linksTarget = (p: any) => {
+      try {
+        const h = norm(new URL(p.websiteUri).hostname);
+        return h === target || h.endsWith("." + target);
+      } catch { return false; }
+    };
+    const match = places.find(linksTarget);
+    if (!match) return { checked: true, query, found: false, nearMisses: places.length };
+    return {
+      checked: true, query, found: true,
+      name: match.displayName?.text,
+      rating: match.rating,
+      reviews: match.userRatingCount,
+      address: match.formattedAddress,
+      businessStatus: match.businessStatus,
+      mapsUrl: match.googleMapsUri,
+      nearMisses: places.length - 1,
+    };
+  } catch (e: any) {
+    return { checked: false, found: false, query, error: String(e?.message ?? e) };
+  }
+}
+
 // ---- robots.txt -------------------------------------------------------------------------------
 
 function parseRobots(text: string): SiteSignals["robotsTxt"] {
@@ -416,6 +502,8 @@ export async function crawlSite(inputUrl: string, onProgress?: (phase: string, p
   return {
     inputUrl: seed.href, finalUrl: home.finalUrl, host: finalUrl.hostname,
     https: finalUrl.protocol === "https:",
+    siteName: extractSiteName(home.text, finalUrl.hostname),
+    googlePlaces: { checked: false, found: false }, // caller fills this in when a key is configured
     robotsTxt, sitemap, llmsTxt, pages,
     crawl: { pagesFetched: pages.length, errors: errors.slice(0, 10), truncated, ms: Date.now() - started },
   };
@@ -500,7 +588,7 @@ Use EXACTLY these categories, in this order:
 - content ("Content & Heading Structure"): H1 hygiene, heading outline quality, word counts, thin pages, question-shaped headings, answer-first structure.
 - structured-data ("Structured Data"): schema.org coverage (Organization, Article, FAQPage, Product, BreadcrumbList…), FAQ markup.
 - aeo-readiness ("Answer Engine Readiness"): citability (dates/authors evident in schema), FAQ/Q&A coverage, content likely accessible without JS (low word counts on pages suggest JS-rendered content), hreflang/internationalization.
-- local-presence ("Local Presence & Google Maps"): Google Maps is a major traffic channel for businesses with a physical or service presence. Judge from each page's "local" signals: LocalBusiness (or subtype) schema with address, geo coordinates, telephone and opening hours; a Google Maps link or embed; tel: click-to-call links. We cannot query Google Maps itself, so frame findings as site-side readiness for Google Business Profile / Maps ranking, and when signals are weak recommend claiming a Google Business Profile, linking it from the site, and adding complete LocalBusiness schema. If the site is clearly online-only (no physical presence implied anywhere), say exactly that in one pass finding, score the category 100, and do not pad it with irrelevant failures.
+- local-presence ("Local Presence & Google Maps"): Google Maps is a major traffic channel for businesses with a physical or service presence. Two evidence sources: (a) each page's "local" signals — LocalBusiness (or subtype) schema with address, geo coordinates, telephone and opening hours; a Google Maps link or embed; tel: click-to-call links; and (b) "googlePlaces" — the result of an actual Google Maps lookup for this business. If googlePlaces.checked is true, lead the category with the listing outcome: found=true → report the listing's name, rating, review count, address and businessStatus as facts (low review counts or CLOSED statuses deserve warn findings with recommendations); found=false → this is a HIGH-impact fail ("your business is not findable on Google Maps under a listing that links {host}") with a "create/claim a Google Business Profile and add your website to it" recommendation — mention nearMisses if listings with a similar name exist but none link this domain. If googlePlaces.checked is false, say listing status could not be verified this run and fall back to site-side readiness. If the site is clearly online-only (no physical presence implied anywhere), say exactly that in one pass finding, score the category 100, and do not pad it with irrelevant failures.
 
 Rules:
 - Ground every finding in the provided signals; cite concrete numbers and page URLs from the data. Never invent facts about the site.

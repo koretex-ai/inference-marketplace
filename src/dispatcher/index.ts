@@ -36,7 +36,7 @@ import { SolanaVerifier, USDC_MINT_MAINNET } from "../shared/solana.js";
 import { StripePayments } from "../shared/stripe.js";
 import { MemoryAeoStore, type AeoStore } from "../shared/aeo-store.js";
 import { PostgresAeoStore } from "../shared/aeo-store-postgres.js";
-import { crawlSite, generateAeoReport, normalizeSiteUrl, type AeoReport } from "./aeo-review.js";
+import { crawlSite, generateAeoReport, lookupGooglePlaces, normalizeSiteUrl, type AeoReport } from "./aeo-review.js";
 import { Pairing } from "./pairing.js";
 import { QrLogin } from "./qr-login.js";
 import { Challenges } from "./challenge.js";
@@ -126,6 +126,10 @@ const AEO_UNLIMITED_EMAILS = new Set(
 // With no login on the review flow, cap job starts per client IP so a scripted loop can't burn
 // OpenRouter spend (per-email caps alone are defeated by making emails up).
 const AEO_STARTS_PER_IP_PER_HOUR = Number(process.env.AEO_STARTS_PER_IP_PER_HOUR ?? 6);
+// Google Places API key ("Places API (New)") — lets the report verify the business's actual
+// Google Maps listing (found/not-found, rating, reviews). Optional: unset = the report says
+// listing status wasn't verified. SECRET — server-side only.
+const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY ?? "";
 
 /** Credits issued for a USDC amount (base units, 6 decimals), floored. */
 function creditsFor(usdcRaw: number): number {
@@ -280,6 +284,11 @@ async function runAeoJob(job: AeoJob): Promise<void> {
   try {
     const signals = await crawlSite(job.url, (phase, n) => { job.phase = phase; job.pagesFetched = n; });
     job.status = "analyzing";
+    if (GOOGLE_PLACES_API_KEY) {
+      job.phase = "checking Google Maps";
+      signals.googlePlaces = await lookupGooglePlaces(signals.siteName, signals.host, GOOGLE_PLACES_API_KEY);
+      if (signals.googlePlaces.error) console.error(`[aeo] places lookup failed for ${job.site}:`, signals.googlePlaces.error);
+    }
     job.phase = "generating report";
     const { report, model } = await generateAeoReport(signals, { apiKey: OPENROUTER_API_KEY, model: OPENROUTER_MODEL });
     const now = Date.now();
