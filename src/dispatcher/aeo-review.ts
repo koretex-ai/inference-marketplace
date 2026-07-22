@@ -13,11 +13,15 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
-// ---- crawl limits (deliberately modest: this is a free report, not a full-site spider) --------
-const MAX_PAGES = 12;              // homepage + up to 11 discovered pages
+// ---- crawl limits ----------------------------------------------------------------------------
+// Sized so a typical small/mid site (≤ ~100 pages) gets a FULL crawl; pages are fetched
+// CONCURRENTLY so even the cap fits well inside the budget. Bigger sites get sampled and the
+// report says so. Both knobs are env-tunable without a deploy.
+const MAX_PAGES = Math.max(1, Number(process.env.AEO_MAX_PAGES ?? 100));
 const PAGE_BYTE_CAP = 1_500_000;   // per-page HTML cap — enough for any real page's <head>+body
 const FETCH_TIMEOUT_MS = 12_000;   // per-request
-const CRAWL_BUDGET_MS = 60_000;    // whole-crawl wall clock
+const CRAWL_BUDGET_MS = Math.max(30_000, Number(process.env.AEO_CRAWL_BUDGET_MS ?? 180_000));
+const CRAWL_CONCURRENCY = 6;       // parallel page fetches (polite but fast: ~60 pages in ~20s)
 const MAX_REDIRECTS = 5;
 
 export interface PageSignals {
@@ -361,19 +365,29 @@ export async function crawlSite(inputUrl: string, onProgress?: (phase: string, p
     } catch {}
   }
 
+  // Fetch the queue with a small worker pool — wall clock ≈ pages/CONCURRENCY, not pages.
   let truncated = false;
-  for (const pageUrl of queue) {
-    if (pages.length >= MAX_PAGES) { truncated = true; break; }
-    if (budgetLeft() < FETCH_TIMEOUT_MS) { truncated = true; errors.push("crawl time budget reached"); break; }
-    progress("crawling pages", pages.length);
-    try {
-      const r = await safeFetch(pageUrl);
-      if (!/text\/html|application\/xhtml/.test(r.contentType) && r.contentType) continue;
-      pages.push(extractPageSignals(r.finalUrl, r.status, r.text));
-    } catch (e: any) {
-      errors.push(`${pageUrl}: ${e.message}`);
+  let budgetHit = false;
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      if (pages.length >= MAX_PAGES) { if (next < queue.length) truncated = true; return; }
+      if (budgetLeft() < FETCH_TIMEOUT_MS) { truncated = true; budgetHit = true; return; }
+      const i = next++;
+      if (i >= queue.length) return;
+      progress("crawling pages", pages.length);
+      try {
+        const r = await safeFetch(queue[i]);
+        if (!/text\/html|application\/xhtml/.test(r.contentType) && r.contentType) continue;
+        if (pages.length < MAX_PAGES) pages.push(extractPageSignals(r.finalUrl, r.status, r.text));
+        else truncated = true;
+      } catch (e: any) {
+        errors.push(`${queue[i]}: ${e.message}`);
+      }
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(CRAWL_CONCURRENCY, queue.length) }, worker));
+  if (budgetHit) errors.push("crawl time budget reached");
   progress("crawl complete", pages.length);
 
   return {
