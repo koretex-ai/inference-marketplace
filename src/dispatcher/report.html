@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Koretex — SEO &amp; AEO site review</title>
-<meta name="description" content="Enter your website and get an exhaustive, free report on how well it ranks in classic search (SEO) and how well AI assistants can crawl, understand and recommend it (AEO)." />
+<meta name="description" content="Free, exhaustive site audit: how well your website turns search and AI assistants into leads — classic SEO plus AEO (ChatGPT, Claude, Perplexity, Google AI Overviews)." />
 <link rel="icon" type="image/svg+xml" href="/koretex-favicon.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -44,18 +44,14 @@
     letter-spacing:.16em;text-transform:uppercase}
   .navlinks a{color:var(--ink-muted)}
   .navlinks a:hover{color:var(--accent)}
-  .who{font-family:var(--font-sans);font-size:12px;letter-spacing:.06em;color:var(--ink-muted)}
-  .who b{color:var(--ink);font-weight:500}
-  button.navbtn{font-family:var(--font-sans);font-size:12px;letter-spacing:.16em;text-transform:uppercase;
-    background:none;border:none;color:var(--ink-muted);cursor:pointer;padding:0}
-  button.navbtn:hover{color:var(--accent)}
 
   /* hero + form */
   section.hero{padding:72px 0 64px}
   h1.headline{font-family:var(--font-display);font-weight:500;font-size:clamp(40px,5.4vw,60px);
     line-height:1.06;letter-spacing:-.01em;margin:0 0 24px;max-width:820px}
   h1.headline em{font-style:italic;color:var(--accent)}
-  .lede{font-size:clamp(19px,2vw,22px);line-height:1.55;color:var(--ink-soft);max-width:680px;margin:0 0 44px}
+  .lede{font-size:clamp(19px,2vw,22px);line-height:1.55;color:var(--ink-soft);max-width:700px;margin:0 0 44px}
+  .lede strong{color:var(--ink);font-weight:600}
   .askrow{display:flex;gap:26px;align-items:flex-end;flex-wrap:wrap;max-width:760px}
   .askfield{flex:1;min-width:260px}
   .askfield label{display:block;font-family:var(--font-sans);font-weight:500;font-size:11px;
@@ -77,6 +73,21 @@
     font-size:24px;color:var(--ink-soft);padding:8px 0 0}
   .progressline .pulse{width:9px;height:9px;border-radius:50%;background:var(--accent);
     animation:kx-pulse 1.4s ease-in-out infinite;flex:0 0 auto}
+
+  /* contact modal */
+  .overlay{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;
+    padding:24px;background:rgba(26,23,20,.38)}
+  .overlay.open{display:flex}
+  .modal{background:var(--bg);border:1px solid var(--rule);max-width:520px;width:100%;padding:40px 44px 36px}
+  .modal h3{font-family:var(--font-display);font-weight:500;font-size:30px;line-height:1.15;margin:0 0 10px}
+  .modal h3 em{font-style:italic;color:var(--accent)}
+  .modal p{font-size:17px;color:var(--ink-soft);margin:0 0 24px;line-height:1.5}
+  .modal .askfield{margin-bottom:20px;min-width:0}
+  .modal .askfield input{font-size:22px}
+  .modal-actions{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:6px}
+  button.dismiss{font-family:var(--font-sans);font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+    background:none;border:none;color:var(--ink-muted);cursor:pointer;padding:0}
+  button.dismiss:hover{color:var(--accent)}
 
   /* report */
   section.report{padding:0 0 40px}
@@ -137,7 +148,7 @@
     font-family:var(--font-sans);font-size:12px;letter-spacing:.08em;color:var(--ink-muted)}
   .foot-row .mark{font-family:var(--font-display);font-weight:500;font-size:14px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink)}
   .foot-row .right{display:flex;gap:22px}
-  @media(max-width:560px){.container{padding:0 24px} section.hero{padding:52px 0 48px}}
+  @media(max-width:560px){.container{padding:0 24px} section.hero{padding:52px 0 48px} .modal{padding:30px 26px}}
 </style>
 </head>
 <body>
@@ -146,9 +157,6 @@
       <a href="/" style="border:none"><span class="wordmark">Koretex<span class="dot" aria-hidden="true"></span></span></a>
       <div class="navlinks">
         <a href="/node">Run a node</a>
-        <span class="who hidden" id="who"></span>
-        <button class="navbtn hidden" id="signout">Sign out</button>
-        <button class="navbtn" id="signin">Log in with Google</button>
       </div>
     </nav>
   </div>
@@ -156,17 +164,17 @@
 
   <section class="hero">
     <div class="container">
-      <div class="eyebrow">Free site audit</div>
-      <h1 class="headline">How do AI assistants <em>see your website?</em></h1>
-      <p class="lede">Enter your website. We crawl it — robots.txt, sitemap, structured data, up to a hundred pages — and an AI auditor writes an exhaustive report: how you rank for classic search (SEO), and whether ChatGPT, Claude, Perplexity and Google&rsquo;s AI Overviews can crawl, understand and recommend you (AEO).</p>
+      <div class="eyebrow">Free SEO &amp; AEO audit</div>
+      <h1 class="headline">Your next lead is searching. <em>Can they find you?</em></h1>
+      <p class="lede">Customers don&rsquo;t just Google any more — they ask ChatGPT, Claude, Perplexity and Google&rsquo;s AI Overviews who to buy from. If your site isn&rsquo;t optimized for classic search (<strong>SEO</strong>) and for AI answers (<strong>AEO</strong>), those leads quietly go to a competitor. Enter your website and get an exhaustive, free report: where you stand, what&rsquo;s costing you leads, and exactly what to fix first.</p>
       <div class="askrow">
         <div class="askfield">
           <label for="site_url">Your website</label>
           <input id="site_url" placeholder="example.com" autocomplete="url" spellcheck="false" />
         </div>
-        <button class="cta" id="go">Generate the report</button>
+        <button class="cta" id="go">Get my free report</button>
       </div>
-      <p class="form-note" id="hint">Free &middot; one website per account &middot; Google login required.</p>
+      <p class="form-note" id="hint">Free &middot; one website per person &middot; no account needed &middot; ready in about two minutes.</p>
       <div class="errline hidden" id="err"></div>
       <div class="progressline hidden" id="progress"><span class="pulse"></span><span id="phase">Starting&hellip;</span></div>
     </div>
@@ -182,8 +190,8 @@
       <h2 class="sect" style="margin-top:0">Read the way <em>a machine reads you.</em></h2>
       <div class="steps">
         <div class="step"><h3>Crawl</h3><p>Our crawler walks your site the way a search or answer engine would: robots.txt and its per-crawler rules, your sitemap, llms.txt, and up to a hundred pages of real HTML.</p></div>
-        <div class="step"><h3>Extract</h3><p>Every page is reduced to facts — titles, descriptions, canonicals, heading structure, schema.org markup, alt coverage, word counts — measured, not guessed.</p></div>
-        <div class="step"><h3>Audit</h3><p>An AI auditor turns those facts into scores, findings and a prioritised to-do list: what helps you rank, what blocks AI assistants from citing you, and what to fix first.</p></div>
+        <div class="step"><h3>Extract</h3><p>Every page is reduced to facts — titles, descriptions, canonicals, heading structure, schema.org markup, local-business and Google Maps signals — measured, not guessed.</p></div>
+        <div class="step"><h3>Audit</h3><p>An AI auditor turns those facts into scores, findings and a prioritised to-do list: what helps you rank, what blocks AI assistants from recommending you, and what to fix first to win more leads.</p></div>
       </div>
     </div>
   </section>
@@ -198,63 +206,40 @@
     </div>
   </footer>
 
-<script src="/wallet.js"></script>
+  <!-- contact modal: shown once, before the first report starts -->
+  <div class="overlay" id="contactModal" role="dialog" aria-modal="true" aria-labelledby="cmTitle">
+    <div class="modal">
+      <h3 id="cmTitle">Where should we send <em>your results?</em></h3>
+      <p>Your report appears right here when it&rsquo;s ready — leave your details so we can follow up with insights for your site. We&rsquo;ll only reach out about your report.</p>
+      <div class="askfield">
+        <label for="cm_email">Email</label>
+        <input id="cm_email" type="email" placeholder="you@company.com" autocomplete="email" />
+      </div>
+      <div class="askfield">
+        <label for="cm_phone">Phone <span style="text-transform:none;letter-spacing:0">(optional)</span></label>
+        <input id="cm_phone" type="tel" placeholder="+1 555 000 0000" autocomplete="tel" />
+      </div>
+      <div class="errline hidden" id="cm_err"></div>
+      <div class="modal-actions">
+        <button class="cta" id="cm_go">Start my report</button>
+        <button class="dismiss" id="cm_cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 (() => {
-  const W = window.KoretexWallet;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const PENDING = "kx_aeo_url";
+  const CONTACT_KEY = "kx_contact";
 
-  // ------------------------------------------------------------- wallet session (same protocol
-  // as the node console: challenge → wallet signature → bearer session token per wallet).
-  let address = null;
-  const Auth = {
-    session: null,
-    key: (a) => "koretex_sess_" + a,
-    loadStored(a) { try { const s = JSON.parse(sessionStorage.getItem(Auth.key(a)) || "null"); return (s && s.token && s.expiresAt > Date.now()) ? s : null; } catch { return null; } },
-    save(s) { Auth.session = s; try { sessionStorage.setItem(Auth.key(address), JSON.stringify(s)); } catch {} },
-    clear() { if (address) try { sessionStorage.removeItem(Auth.key(address)); } catch {} Auth.session = null; },
-    async ensure(interactive) {
-      if (Auth.session && Auth.session.expiresAt > Date.now() + 5000) return Auth.session.token;
-      const stored = Auth.loadStored(address);
-      if (stored) { Auth.session = stored; return stored.token; }
-      if (!interactive) return null;
-      const ch = await (await fetch("/provider/challenge?for=credits")).json();
-      const { signature } = await W.signMessageBase64(ch.message);
-      const res = await fetch("/credits/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey: address, nonce: ch.nonce, signature }) });
-      const d = await res.json();
-      if (!res.ok) throw new Error((d.error && d.error.message) || "Could not start a session.");
-      Auth.save({ token: d.token, expiresAt: d.expiresAt });
-      return d.token;
-    },
-    async gatedPost(path, extra, interactive) {
-      const send = (token) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pubkey: address, session: token, ...(extra || {}) }) });
-      let token = await Auth.ensure(interactive);
-      if (!token) throw Object.assign(new Error("needs-auth"), { needsAuth: true });
-      let res = await send(token);
-      if (res.status === 401) { Auth.clear(); if (!interactive) throw Object.assign(new Error("needs-auth"), { needsAuth: true }); res = await send(await Auth.ensure(true)); }
-      return res;
-    },
+  const Contact = {
+    load() { try { const c = JSON.parse(localStorage.getItem(CONTACT_KEY) || "null"); return (c && c.email) ? c : null; } catch { return null; } },
+    save(c) { try { localStorage.setItem(CONTACT_KEY, JSON.stringify(c)); } catch {} },
   };
 
-  function setAddress(addr) {
-    address = addr;
-    $("signin").classList.toggle("hidden", !!addr);
-    $("signout").classList.toggle("hidden", !addr);
-    $("who").classList.toggle("hidden", !addr);
-    if (addr) $("who").innerHTML = "<b>" + esc(addr.slice(0, 5) + "…" + addr.slice(-4)) + "</b>";
-    if (addr) Review.onLogin();
-  }
-  async function login(returnTo) {
-    try { await W.connectGoogle(returnTo || location.pathname); } catch (e) { alert((e && e.message) || e); }
-  }
-  $("signin").addEventListener("click", () => login("/"));
-  $("signout").addEventListener("click", () => { Auth.clear(); setAddress(null); });
-
-  // ------------------------------------------------------------- review flow
   const Review = {
-    timer: null, loadedSaved: false, sharedLoaded: false,
+    timer: null, loadedSaved: false, sharedLoaded: false, pendingUrl: null,
     shareUrl: (site) => location.origin + "/aeo-seo-review/" + encodeURIComponent(site),
     sharedSlug() {
       const m = location.pathname.match(/^\/aeo-seo-review\/(.+)$/);
@@ -264,20 +249,29 @@
     clearErr() { $("err").classList.add("hidden"); },
     progress(text) { $("progress").classList.remove("hidden"); $("phase").textContent = text; },
     stop() { $("progress").classList.add("hidden"); if (Review.timer) { clearInterval(Review.timer); Review.timer = null; } $("go").disabled = false; },
-    async submit() {
+    submit() {
       const url = $("site_url").value.trim();
       if (!url) return Review.err("Enter your website first.");
-      if (!address) {
-        try { sessionStorage.setItem(PENDING, url); } catch {}
-        return login("/");
+      Review.clearErr();
+      const contact = Contact.load();
+      if (!contact) {
+        // First report on this browser: collect contact details, then start.
+        Review.pendingUrl = url;
+        $("cm_err").classList.add("hidden");
+        $("contactModal").classList.add("open");
+        setTimeout(() => $("cm_email").focus(), 50);
+        return;
       }
-      Review.start(url);
+      Review.start(url, contact);
     },
-    async start(url) {
+    async start(url, contact) {
       $("go").disabled = true; Review.clearErr(); $("report").classList.add("hidden");
       Review.progress("Starting the crawl…");
       try {
-        const res = await Auth.gatedPost("/aeo/review", { url }, true);
+        const res = await fetch("/aeo/review", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ url, email: contact.email, phone: contact.phone || "" }),
+        });
         const d = await res.json();
         if (!res.ok) throw new Error((d.error && d.error.message) || "Could not start the review.");
         Review.poll(d.jobId);
@@ -333,54 +327,60 @@
       $("report").classList.remove("hidden");
       $("report").scrollIntoView({ behavior: "smooth", block: "start" });
     },
-    // A share link loads that site's public report, no login. Otherwise: resume a pre-login
-    // submit, or show the wallet's own saved report.
-    async openShared() {
+    // A share link (/aeo-seo-review/<site>) loads that site's public report; otherwise a
+    // returning visitor's own saved report loads via their remembered email.
+    async boot() {
       const slug = Review.sharedSlug();
-      if (!slug || Review.sharedLoaded) return false;
-      Review.sharedLoaded = true;
-      $("site_url").value = slug;
-      try {
-        const res = await fetch("/aeo/shared?site=" + encodeURIComponent(slug));
-        const d = await res.json();
-        if (!res.ok) throw new Error((d.error && d.error.message) || "Could not load the shared report.");
-        $("hint").textContent = "A shared report for " + slug + " — generate one for your own site, free.";
-        Review.render(d.report, d);
-      } catch (e) { Review.err((e && e.message) || String(e)); }
-      return true;
-    },
-    async onLogin() {
-      let pending = null;
-      try { pending = sessionStorage.getItem(PENDING); } catch {}
-      if (pending) {
-        try { sessionStorage.removeItem(PENDING); } catch {}
-        $("site_url").value = pending;
-        return Review.start(pending);
+      if (slug) {
+        Review.sharedLoaded = true;
+        $("site_url").value = slug;
+        try {
+          const res = await fetch("/aeo/shared?site=" + encodeURIComponent(slug));
+          const d = await res.json();
+          if (!res.ok) throw new Error((d.error && d.error.message) || "Could not load the shared report.");
+          $("hint").textContent = "A shared report for " + slug + " — get one for your own site, free.";
+          Review.render(d.report, d);
+        } catch (e) { Review.err((e && e.message) || String(e)); }
+        return;
       }
-      if (Review.sharedSlug() || Review.loadedSaved) return;
-      Review.loadedSaved = true;
+      const contact = Contact.load();
+      if (!contact) return;
       try {
-        const res = await Auth.gatedPost("/aeo/report", null, false);
+        const res = await fetch("/aeo/report", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: contact.email }) });
         const d = await res.json();
         if (res.ok && d.report) {
           $("site_url").value = d.url || d.site || "";
           $("hint").textContent = "Your report is for " + d.site + " — re-run it any time.";
           Review.render(d.report, d);
         }
-      } catch { /* no session yet — they'll sign when they generate */ }
+      } catch { /* nothing saved yet */ }
     },
   };
+
+  // Contact modal wiring — validate, remember, then start the pending review.
+  function modalSubmit() {
+    const email = $("cm_email").value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+      const e = $("cm_err"); e.textContent = "Enter a valid email — that's where your report lives."; e.classList.remove("hidden");
+      return;
+    }
+    const contact = { email, phone: $("cm_phone").value.trim() };
+    Contact.save(contact);
+    $("contactModal").classList.remove("open");
+    if (Review.pendingUrl) { const u = Review.pendingUrl; Review.pendingUrl = null; Review.start(u, contact); }
+  }
+  $("cm_go").addEventListener("click", modalSubmit);
+  $("cm_phone").addEventListener("keydown", (e) => { if (e.key === "Enter") modalSubmit(); });
+  $("cm_email").addEventListener("keydown", (e) => { if (e.key === "Enter") modalSubmit(); });
+  $("cm_cancel").addEventListener("click", () => { Review.pendingUrl = null; $("contactModal").classList.remove("open"); });
+  $("contactModal").addEventListener("click", (e) => { if (e.target === $("contactModal")) $("cm_cancel").click(); });
+
   // Console/demo handle (e.g. KoretexReview.render(reportJson)) — the page itself never uses it.
   window.KoretexReview = Review;
   $("go").addEventListener("click", () => Review.submit());
   $("site_url").addEventListener("keydown", (e) => { if (e.key === "Enter") Review.submit(); });
 
-  // ------------------------------------------------------------- boot
-  (async () => {
-    await Review.openShared();
-    W.onDisconnect(() => setAddress(null));
-    try { const addr = await W.init(); if (addr) setAddress(addr); } catch {}
-  })();
+  Review.boot();
 })();
 </script>
 </body>

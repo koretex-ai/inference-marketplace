@@ -115,13 +115,17 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "";
 // Which OpenRouter model writes the report. Open-weight by policy; DeepSeek V4 is the current
 // price/quality sweet spot for structured analysis. Override per-env without a deploy.
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL ?? "deepseek/deepseek-v4-pro";
-// Regeneration ceiling per wallet per day (same site only — a different site is refused outright).
+// Regeneration ceiling per email per day (same site only — a different site is refused outright).
 const AEO_RUNS_PER_DAY = Number(process.env.AEO_RUNS_PER_DAY ?? 3);
-// Wallets exempt from BOTH the one-site lock and the daily cap (comma-separated pubkeys, e.g.
-// the operator generating example reports / case studies). ADMIN_WALLET is always included.
-const AEO_UNLIMITED_WALLETS = new Set(
-  [ADMIN_WALLET, ...(process.env.AEO_UNLIMITED_WALLETS ?? "").split(",")].map((s) => s.trim()).filter(Boolean),
+// Emails exempt from BOTH the one-site lock and the daily cap (comma-separated), for the
+// operator generating example reports / case studies. The identity is the self-reported contact
+// email from the report modal — convenient, not authenticated; keep the list to our own people.
+const AEO_UNLIMITED_EMAILS = new Set(
+  (process.env.AEO_UNLIMITED_EMAILS ?? "moreshkokane@gmail.com").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
 );
+// With no login on the review flow, cap job starts per client IP so a scripted loop can't burn
+// OpenRouter spend (per-email caps alone are defeated by making emails up).
+const AEO_STARTS_PER_IP_PER_HOUR = Number(process.env.AEO_STARTS_PER_IP_PER_HOUR ?? 6);
 
 /** Credits issued for a USDC amount (base units, 6 decimals), floored. */
 function creditsFor(usdcRaw: number): number {
@@ -250,7 +254,7 @@ const aeoStore: AeoStore = process.env.DATABASE_URL
 // just means re-running it. Finished reports persist in aeoStore, not here.
 interface AeoJob {
   id: string;
-  wallet: string;
+  owner: string; // contact email (lowercased)
   url: string;
   site: string;
   status: "crawling" | "analyzing" | "done" | "error";
@@ -261,9 +265,10 @@ interface AeoJob {
   startedAt: number;
 }
 const aeoJobs = new Map<string, AeoJob>();
-// Per-wallet run timestamps for the daily regeneration cap (in-memory; the cap is a courtesy
-// guard on OpenRouter spend, not a billing invariant).
+// Per-email and per-IP run timestamps for the spend caps (in-memory; a courtesy guard on
+// OpenRouter spend, not a billing invariant).
 const aeoRuns = new Map<string, number[]>();
+const aeoIpRuns = new Map<string, number[]>();
 const AEO_JOB_TTL_MS = 30 * 60_000;
 setInterval(() => {
   const cutoff = Date.now() - AEO_JOB_TTL_MS;
@@ -278,9 +283,9 @@ async function runAeoJob(job: AeoJob): Promise<void> {
     job.phase = "generating report";
     const { report, model } = await generateAeoReport(signals, { apiKey: OPENROUTER_API_KEY, model: OPENROUTER_MODEL });
     const now = Date.now();
-    // created_at is set once per (wallet, site) — both stores preserve it on re-runs.
+    // created_at is set once per (owner, site) — both stores preserve it on re-runs.
     await aeoStore.save({
-      wallet: job.wallet, site: job.site, url: job.url, report, model,
+      owner: job.owner, site: job.site, url: job.url, report, model,
       createdAt: now, updatedAt: now,
     });
     job.report = report;
@@ -1603,38 +1608,53 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
   }
 
   // ---- AEO/SEO review ------------------------------------------------------------------------
-  // Start a review (wallet-gated). Free tier: each wallet gets ONE site — the first completed
-  // report locks the wallet to that host; the same host may be re-run (capped/day), any other
-  // host is refused until credits-based reviews exist.
+  // Start a review. No login: the visitor's contact email (from the modal) is the identity.
+  // Free tier: each email gets ONE site — the first completed report locks the email to that
+  // host; the same host may be re-run (capped/day), any other host is refused. Emails in
+  // AEO_UNLIMITED_EMAILS skip both caps (operator/case-study use).
   if (req.method === "POST" && url.pathname === "/aeo/review") {
     return readJson(req, res, async (b) => {
-      const pubkey = authCreditsWallet(res, b);
-      if (!pubkey) return;
       if (!OPENROUTER_API_KEY)
         return json(res, 503, { error: { message: "site review isn't configured on this server yet" } });
+      const email = String(b.email ?? "").trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email))
+        return json(res, 400, { error: { message: "enter a valid email address" } });
+      const phone = String(b.phone ?? "").trim().slice(0, 40);
       let target: URL;
       try { target = normalizeSiteUrl(String(b.url ?? "")); }
       catch (e: any) { return json(res, 400, { error: { message: e.message } }); }
       const site = target.hostname.replace(/^www\./, "");
-      const unlimited = AEO_UNLIMITED_WALLETS.has(pubkey);
+      // Record the contact regardless of whether the review runs — it's the outreach list.
+      const now = Date.now();
+      await aeoStore.saveContact({ email, phone, firstSeenAt: now, lastSeenAt: now });
+      const unlimited = AEO_UNLIMITED_EMAILS.has(email);
       if (!unlimited) {
-        const existing = await aeoStore.forWallet(pubkey);
+        const existing = await aeoStore.forOwner(email);
         if (existing && existing.site !== site)
           return json(res, 403, { error: { message: `your free review is already used for ${existing.site} — you can re-run that site, but reviewing a second site isn't available yet`, lockedSite: existing.site } });
       }
-      const runs = (aeoRuns.get(pubkey) ?? []).filter((t) => t > Date.now() - 86_400_000);
+      const runs = (aeoRuns.get(email) ?? []).filter((t) => t > now - 86_400_000);
       if (!unlimited && runs.length >= AEO_RUNS_PER_DAY)
         return json(res, 429, { error: { message: `daily limit reached (${AEO_RUNS_PER_DAY} runs) — try again tomorrow` } });
-      // One in-flight job per wallet — a second submit re-attaches to the running one.
+      // Per-IP throttle: emails are self-reported, so the IP cap is what actually bounds spend.
+      const ip = String(req.headers["x-forwarded-for"] ?? "").split(",")[0].trim() || req.socket.remoteAddress || "?";
+      const ipRuns = (aeoIpRuns.get(ip) ?? []).filter((t) => t > now - 3_600_000);
+      if (!unlimited && ipRuns.length >= AEO_STARTS_PER_IP_PER_HOUR)
+        return json(res, 429, { error: { message: "too many reviews from this connection — try again in an hour" } });
+      // One in-flight job per email: a re-submit of the SAME site re-attaches to the running
+      // job; a different site while one is running is refused (unless unlimited).
       for (const j of aeoJobs.values()) {
-        if (j.wallet === pubkey && (j.status === "crawling" || j.status === "analyzing"))
-          return json(res, 200, { jobId: j.id, site: j.site, resumed: true });
+        if (j.owner !== email || (j.status !== "crawling" && j.status !== "analyzing")) continue;
+        if (j.site === site) return json(res, 200, { jobId: j.id, site: j.site, resumed: true });
+        if (!unlimited) return json(res, 429, { error: { message: `a review of ${j.site} is already running — let it finish first` } });
       }
-      runs.push(Date.now());
-      aeoRuns.set(pubkey, runs);
+      runs.push(now);
+      aeoRuns.set(email, runs);
+      ipRuns.push(now);
+      aeoIpRuns.set(ip, ipRuns);
       const job: AeoJob = {
-        id: randomUUID(), wallet: pubkey, url: target.href, site,
-        status: "crawling", phase: "starting", pagesFetched: 0, startedAt: Date.now(),
+        id: randomUUID(), owner: email, url: target.href, site,
+        status: "crawling", phase: "starting", pagesFetched: 0, startedAt: now,
       };
       aeoJobs.set(job.id, job);
       void runAeoJob(job);
@@ -1664,12 +1684,14 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
     );
     return;
   }
-  // The wallet's saved report (wallet-gated) — so returning users see their report instantly.
+  // The visitor's saved report (looked up by their remembered contact email) — so returning
+  // visitors see their report instantly. Reports are public-by-site anyway (/aeo/shared), so an
+  // email lookup exposes nothing a share link doesn't.
   if (req.method === "POST" && url.pathname === "/aeo/report") {
     return readJson(req, res, async (b) => {
-      const pubkey = authCreditsWallet(res, b);
-      if (!pubkey) return;
-      const rec = await aeoStore.forWallet(pubkey);
+      const email = String(b.email ?? "").trim().toLowerCase();
+      if (!email) return json(res, 200, { report: null });
+      const rec = await aeoStore.forOwner(email);
       if (!rec) return json(res, 200, { report: null });
       return json(res, 200, { report: rec.report, site: rec.site, url: rec.url, model: rec.model, updatedAt: rec.updatedAt });
     });
