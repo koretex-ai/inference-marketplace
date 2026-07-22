@@ -116,18 +116,6 @@
   .codeblock code{flex:1;white-space:nowrap;overflow-x:auto;color:#C0CAF5}
   .gate{text-align:center;padding:30px 10px}
   .gate p{color:var(--soft);margin-bottom:16px}
-  /* ---- AEO/SEO review report ---- */
-  .aeo-b{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:2px 9px;border-radius:980px;margin-right:8px;vertical-align:middle}
-  .aeo-b.pass{color:#0E7A52;background:rgba(31,181,122,.16)}
-  .aeo-b.warn{color:#8A6100;background:rgba(240,180,41,.2)}
-  .aeo-b.fail{color:#A32020;background:rgba(210,59,59,.15)}
-  .aeo-f{padding:10px 0;border-bottom:1px solid var(--line)}
-  .aeo-f:last-child{border-bottom:none}
-  .aeo-f .d{color:var(--soft);font-size:14px;margin-top:4px}
-  .aeo-f .r{font-size:14px;margin-top:4px}
-  .aeo-catscore{float:right;font-weight:700;font-variant-numeric:tabular-nums}
-  .aeo-spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--indigo);border-radius:50%;animation:aeospin .8s linear infinite;vertical-align:-2px;margin-right:8px}
-  @keyframes aeospin{to{transform:rotate(360deg)}}
   .hidden{display:none !important}
   ul.bullets{list-style:none;margin-top:12px;display:flex;flex-direction:column;gap:9px}
   ul.bullets li{position:relative;padding-left:22px;font-size:15px}
@@ -249,7 +237,7 @@
   <div id="bgwash"></div>
 
   <nav>
-    <a class="brand" href="/"><img class="logo" src="/koretex-favicon.svg" alt="Koretex" width="24" height="24" /><span>Kore<b>tex</b></span></a>
+    <a class="brand" href="/node"><img class="logo" src="/koretex-favicon.svg" alt="Koretex" width="24" height="24" /><span>Kore<b>tex</b></span></a>
     <div class="walletbar">
       <span class="waddr hidden" id="waddr"></span>
       <button class="btn btn-ghost btn-sm hidden" id="disconnectBtn">Sign out</button>
@@ -267,7 +255,6 @@
     <button data-tab="leaderboard">Leaderboard</button>
     <button data-tab="points">Points</button>
     <button data-tab="run">Run a node</button>
-    <button data-tab="aeo">SEO Review</button>
   </div>
 
   <main>
@@ -667,26 +654,6 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
       </div>
     </section>
 
-    <!-- ================= AEO / SEO REVIEW ================= -->
-    <section class="panel" id="tab-aeo">
-      <span class="eyebrow">Free site audit</span>
-      <h1>SEO &amp; AEO <span class="grad">review</span></h1>
-      <p class="sub">Enter your website and get an exhaustive report: how well it's optimized for classic search engines (SEO) and how well AI assistants — ChatGPT, Claude, Perplexity, Google AI Overviews — can crawl, understand and recommend it (AEO). We crawl your site (up to ~100 pages), check robots/sitemap/structured data, and an AI auditor writes the report.</p>
-
-      <div class="card">
-        <label for="aeo_url">Your website</label>
-        <input id="aeo_url" placeholder="example.com" autocomplete="url" spellcheck="false" />
-        <div style="margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-          <button class="btn btn-grad" id="aeo_go">Generate report</button>
-          <span class="note" style="margin-top:0" id="aeo_hint">Free · one website per account · Google login required</span>
-        </div>
-        <div id="aeoOut"></div>
-      </div>
-
-      <div class="card hidden" id="aeoProgress"><span class="aeo-spin"></span><span id="aeo_phase">Starting…</span></div>
-
-      <div id="aeoReport" class="hidden"></div>
-    </section>
   </main>
 
   <footer class="footer">
@@ -769,14 +736,14 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
   // wallet). The direct-wallet path (Phantom extension) is intentionally hidden.
   async function loginGoogle() {
     try { sessionStorage.setItem("kx_return_tab", currentTab); } catch {}
-    try { await W.connectGoogle("/"); } catch (e) { alert((e && e.message) || e); }
+    try { await W.connectGoogle("/node"); } catch (e) { alert((e && e.message) || e); }
   }
   $("connectBtn").addEventListener("click", loginGoogle);
   document.querySelectorAll(".connect-cta").forEach((b) => b.addEventListener("click", loginGoogle));
   $("disconnectBtn").addEventListener("click", () => { try { Credits.clearSession(); } catch {} setAddress(null); });
 
   // ---------------------------------------------------------------- tab routing
-  const PATH_TAB = { "/": "dashboard", "/dashboard": "dashboard", "/playground": "playground", "/credits": "credits", "/models": "models", "/demand": "demand", "/leaderboard": "leaderboard", "/points": "points", "/provider": "run", "/aeo-seo-review": "aeo" };
+  const PATH_TAB = { "/node": "dashboard", "/node/dashboard": "dashboard", "/node/playground": "playground", "/node/credits": "credits", "/node/models": "models", "/node/demand": "demand", "/node/leaderboard": "leaderboard", "/node/points": "points", "/node/provider": "run" };
   const inited = {};
   let currentTab = "dashboard";
   const tabBtns = [...document.querySelectorAll("#tabbar button")];
@@ -1424,143 +1391,8 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
     },
   };
 
-  // ===================================================================== AEO/SEO REVIEW
-  // Free-with-login site audit. Flow: enter URL → (login with Google if needed; the URL survives
-  // the OAuth round-trip in sessionStorage) → POST /aeo/review → poll the job → render the report.
-  // One website per wallet — the server locks the free report to the first reviewed host.
-  const Aeo = {
-    PENDING: "kx_aeo_url",
-    timer: null, loadedSaved: false, sharedLoaded: false,
-    esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); },
-    progress(text) { $("aeoProgress").classList.remove("hidden"); $("aeo_phase").textContent = text; },
-    stopProgress() { $("aeoProgress").classList.add("hidden"); if (Aeo.timer) { clearInterval(Aeo.timer); Aeo.timer = null; } $("aeo_go").disabled = false; },
-    async submit() {
-      const url = $("aeo_url").value.trim();
-      if (!url) return show($("aeoOut"), "err", "Enter your website URL first.");
-      if (!address) {
-        // Not logged in: stash the URL, round-trip through Google, and resume on return.
-        try { sessionStorage.setItem(Aeo.PENDING, url); sessionStorage.setItem("kx_return_tab", "aeo"); } catch {}
-        try { await W.connectGoogle("/aeo-seo-review"); } catch (e) { alert((e && e.message) || e); }
-        return;
-      }
-      Aeo.start(url);
-    },
-    async start(url) {
-      $("aeo_go").disabled = true; $("aeoOut").innerHTML = ""; $("aeoReport").classList.add("hidden");
-      Aeo.progress("Starting the crawl…");
-      try {
-        const res = await Credits.gatedPost("/aeo/review", { url }, true);
-        const d = await res.json();
-        if (!res.ok) throw new Error((d.error && d.error.message) || "Could not start the review.");
-        Aeo.poll(d.jobId);
-      } catch (e) {
-        Aeo.stopProgress();
-        show($("aeoOut"), "err", Aeo.esc((e && e.message) || String(e)));
-      }
-    },
-    poll(jobId) {
-      if (Aeo.timer) clearInterval(Aeo.timer);
-      Aeo.timer = setInterval(async () => {
-        try {
-          const res = await fetch("/aeo/review/status?id=" + encodeURIComponent(jobId));
-          const d = await res.json();
-          if (!res.ok) throw new Error((d.error && d.error.message) || "Lost track of the review job.");
-          if (d.status === "crawling") Aeo.progress("Crawling " + Aeo.esc(d.site) + " — " + d.pagesFetched + " page" + (d.pagesFetched === 1 ? "" : "s") + " (" + Aeo.esc(d.phase) + ")…");
-          else if (d.status === "analyzing") Aeo.progress("Crawled " + d.pagesFetched + " pages — the AI auditor is writing your report (takes a minute)…");
-          else if (d.status === "done") { Aeo.stopProgress(); Aeo.render(d.report, { site: d.site }); }
-          else if (d.status === "error") throw new Error(d.error || "The review failed.");
-        } catch (e) {
-          Aeo.stopProgress();
-          show($("aeoOut"), "err", Aeo.esc((e && e.message) || String(e)));
-        }
-      }, 2000);
-    },
-    scoreColor(n) { return n >= 75 ? "var(--green)" : n >= 50 ? "#C8880A" : "var(--red)"; },
-    // The public share URL for a report — path-keyed by the site host, e.g. /aeo-seo-review/example.com.
-    shareUrl(site) { return location.origin + "/aeo-seo-review/" + encodeURIComponent(site); },
-    // Site slug from a shared path (/aeo-seo-review/<site>), or null on the plain review page.
-    sharedSlug() {
-      const m = location.pathname.match(/^\/aeo-seo-review\/(.+)$/);
-      try { return m ? decodeURIComponent(m[1]).toLowerCase().replace(/^www\./, "") : null; } catch { return null; }
-    },
-    render(rep, meta) {
-      if (!rep) return;
-      const esc = Aeo.esc;
-      const badge = (s) => '<span class="aeo-b ' + esc(s) + '">' + esc(s) + "</span>";
-      const findings = (list) => (list || []).map((f) =>
-        '<div class="aeo-f">' + badge(f.status) + "<b>" + esc(f.title) + "</b>"
-        + '<div class="d">' + esc(f.detail) + "</div>"
-        + (f.recommendation ? '<div class="r">→ ' + esc(f.recommendation) + "</div>" : "")
-        + "</div>").join("");
-      const cats = (rep.categories || []).map((c) =>
-        '<div class="card"><h3><span class="aeo-catscore" style="color:' + Aeo.scoreColor(c.score) + '">' + Number(c.score) + '</span>' + esc(c.title) + "</h3>" + findings(c.findings) + "</div>").join("");
-      const recs = (rep.topRecommendations || []).slice().sort((a, b) => a.priority - b.priority).map((r) =>
-        "<li><b>" + esc(r.title) + "</b> <span class=\"tier\" style=\"color:" + (r.impact === "high" ? "var(--red)" : r.impact === "medium" ? "#C8880A" : "var(--soft)") + "\">" + esc(r.impact) + " impact</span><div class=\"d\" style=\"color:var(--soft);font-size:14px;margin-top:3px\">" + esc(r.detail) + "</div></li>").join("");
-      const site = rep.site || (meta && meta.site) || "";
-      const shareRow = site
-        ? '<div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><b>Share this report</b><code class="mono" style="flex:1;min-width:200px;overflow-x:auto;white-space:nowrap" id="aeo_share_url">' + esc(Aeo.shareUrl(site)) + '</code><button class="btn btn-ghost btn-sm" id="aeo_share_copy">Copy link</button></div>'
-        : "";
-      $("aeoReport").innerHTML =
-        shareRow
-        + '<div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">'
-        + '<div class="stat"><div class="n" style="background:none;-webkit-text-fill-color:' + Aeo.scoreColor(rep.seoScore) + ';color:' + Aeo.scoreColor(rep.seoScore) + '">' + Number(rep.seoScore) + "/100</div><div class=\"l\">SEO score — classic search</div></div>"
-        + '<div class="stat"><div class="n" style="background:none;-webkit-text-fill-color:' + Aeo.scoreColor(rep.aeoScore) + ';color:' + Aeo.scoreColor(rep.aeoScore) + '">' + Number(rep.aeoScore) + "/100</div><div class=\"l\">AEO score — AI assistants</div></div>"
-        + "</div>"
-        + '<div class="card"><h3>Summary — ' + esc(rep.site || (meta && meta.site) || "") + "</h3><p style=\"margin-top:8px\">" + esc(rep.summary) + "</p></div>"
-        + '<div class="card"><h3>Top recommendations</h3><ol style="padding-left:1.2rem;margin-top:10px;display:flex;flex-direction:column;gap:10px">' + recs + "</ol></div>"
-        + cats
-        + '<p class="note">Generated by an open-weight model via OpenRouter · signals collected by our own crawler · re-run any time (same website).</p>';
-      const copyBtn = $("aeo_share_copy");
-      if (copyBtn) copyBtn.addEventListener("click", async () => {
-        try { await navigator.clipboard.writeText(Aeo.shareUrl(site)); copyBtn.textContent = "Copied ✓"; setTimeout(() => { copyBtn.textContent = "Copy link"; }, 1500); }
-        catch { prompt("Copy the link:", Aeo.shareUrl(site)); }
-      });
-      $("aeoReport").classList.remove("hidden");
-    },
-    // Tab opened (or wallet just connected on it): a shared link (/aeo-seo-review/<site>) loads
-    // that site's public report with NO login; else resume a pending pre-login submit; else show
-    // the wallet's saved report if it has one. Safe to call repeatedly.
-    async open() {
-      const slug = Aeo.sharedSlug();
-      if (slug && !Aeo.sharedLoaded) {
-        Aeo.sharedLoaded = true;
-        $("aeo_url").value = slug;
-        try {
-          const res = await fetch("/aeo/shared?site=" + encodeURIComponent(slug));
-          const d = await res.json();
-          if (!res.ok) throw new Error((d.error && d.error.message) || "Could not load the shared report.");
-          $("aeo_hint").textContent = "Shared report for " + slug + " — generate one for your own site, free.";
-          Aeo.render(d.report, d);
-        } catch (e) { show($("aeoOut"), "err", Aeo.esc((e && e.message) || String(e))); }
-        return;
-      }
-      let pending = null;
-      try { pending = sessionStorage.getItem(Aeo.PENDING); } catch {}
-      if (pending && address) {
-        try { sessionStorage.removeItem(Aeo.PENDING); } catch {}
-        $("aeo_url").value = pending;
-        return Aeo.start(pending);
-      }
-      if (address && !Aeo.loadedSaved) {
-        Aeo.loadedSaved = true;
-        try {
-          const res = await Credits.gatedPost("/aeo/report", null, false);
-          const d = await res.json();
-          if (res.ok && d.report) {
-            $("aeo_url").value = d.url || d.site || "";
-            $("aeo_hint").textContent = "Your account's review is for " + d.site + " — re-run it any time.";
-            Aeo.render(d.report, d);
-          }
-        } catch { /* no session yet — fine, they'll sign when they hit Generate */ }
-      }
-    },
-  };
-  $("aeo_go").addEventListener("click", () => Aeo.submit());
-  $("aeo_url").addEventListener("keydown", (e) => { if (e.key === "Enter") Aeo.submit(); });
-
   // ---------------------------------------------------------------- lazy tab init
   const TAB_INIT = {
-    aeo: () => Aeo.open(),
     models: () => Models.load(),
     demand: () => Demand.load(),
     leaderboard: () => Leaderboard.init(),
@@ -1580,7 +1412,6 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
       if (currentTab === "dashboard") Dash.load();
       if (currentTab === "credits") Credits.open();
       if (currentTab === "playground") Play.open();
-      if (currentTab === "aeo") Aeo.open();
     } else { Dash.reset(); Credits.reset(); Play.reset(); }
   });
   // When switching INTO a wallet tab while already connected, load it.
@@ -1607,7 +1438,7 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &amp;&amp; sud
     // Restore the tab the user was on before a Google round-trip, else hash, else path.
     let initial = location.hash.slice(1);
     try { const rt = sessionStorage.getItem("kx_return_tab"); if (rt) { initial = rt; sessionStorage.removeItem("kx_return_tab"); } } catch {}
-    if (!initial) initial = PATH_TAB[location.pathname] || (location.pathname.indexOf("/aeo-seo-review/") === 0 ? "aeo" : "dashboard");
+    if (!initial) initial = PATH_TAB[location.pathname] || "dashboard";
     selectTab(initial, true);
     try { const addr = await W.init(); if (addr) setAddress(addr); } catch {}
   })();

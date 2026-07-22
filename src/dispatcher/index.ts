@@ -436,7 +436,14 @@ async function ensureWelcomeCredits(wallet: string): Promise<void> {
 // The unified app — one tabbed page that replaces the standalone dashboard/credits/models/
 // leaderboard/points/provider pages. It picks the active tab from the path/hash.
 const APP_HTML = readFileSync(new URL("./app.html", import.meta.url), "utf8");
-const APP_PATHS = new Set(["/", "/dashboard", "/credits", "/models", "/demand", "/leaderboard", "/points", "/provider", "/aeo-seo-review"]);
+// The main site is the AEO/SEO report product (report.html, koretex.ai editorial design). The
+// node console (dashboard/credits/models/…) lives on under /node/* — same app, new address.
+const REPORT_HTML = readFileSync(new URL("./report.html", import.meta.url), "utf8");
+const REPORT_PATHS = new Set(["/", "/aeo-seo-review"]);
+const APP_PATHS = new Set(["/node", "/node/dashboard", "/node/playground", "/node/credits", "/node/models", "/node/demand", "/node/leaderboard", "/node/points", "/node/provider"]);
+// Old console addresses redirect so bookmarks, QR flows and `koretex dashboard` keep working
+// (the URL fragment — e.g. #kx=… keypair sessions — survives a redirect; browsers re-attach it).
+const LEGACY_REDIRECTS = new Set(["/dashboard", "/playground", "/credits", "/models", "/demand", "/leaderboard", "/points", "/provider"]);
 const CONNECT_HTML = readFileSync(new URL("./connect.html", import.meta.url), "utf8");
 const ADMIN_HTML = readFileSync(new URL("./admin.html", import.meta.url), "utf8");
 const AUTH_CALLBACK_HTML = readFileSync(new URL("./auth-callback.html", import.meta.url), "utf8");
@@ -1092,11 +1099,21 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
   // Unified tabbed app — serves every user-facing surface (dashboard, credits, models, leaderboard,
   // points, run-a-node). The app selects the tab from the path/hash. JSON + machine routes
   // (/leaderboard/data, /models/live, /connect, /admin) are exact-matched separately below.
-  // /aeo-seo-review/<site> is the public share link for a generated report (e.g.
-  // /aeo-seo-review/example.com) — same app shell; the client reads the slug and loads the report.
-  if (req.method === "GET" && (APP_PATHS.has(url.pathname) || url.pathname.startsWith("/aeo-seo-review/"))) {
+  // The main site: report generation + shared reports. /aeo-seo-review/<site> is the public
+  // share link (e.g. /aeo-seo-review/example.com) — same page; the client reads the slug.
+  if (req.method === "GET" && (REPORT_PATHS.has(url.pathname) || url.pathname.startsWith("/aeo-seo-review/"))) {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    return res.end(REPORT_HTML);
+  }
+  // The node console (legacy tabbed app) under /node/*.
+  if (req.method === "GET" && APP_PATHS.has(url.pathname)) {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     return res.end(APP_HTML);
+  }
+  // Old console addresses → /node/<same>, permanent.
+  if (req.method === "GET" && LEGACY_REDIRECTS.has(url.pathname)) {
+    res.writeHead(301, { location: "/node" + url.pathname + url.search });
+    return res.end();
   }
   // Leaderboard JSON (aggregated to the wallet). ?epoch=N for a single epoch (default: all-time
   // rolling window), ?limit=N (default 100).
