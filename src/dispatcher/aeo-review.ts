@@ -49,6 +49,15 @@ export interface PageSignals {
   wordCount: number;              // visible-text words (scripts/styles stripped)
   hreflangCount: number;
   hasFaqMarkup: boolean;          // FAQPage/Question schema or <details> Q&A pattern
+  /** Site-side local-SEO signals — what Google Maps / Business Profile ranking feeds on. */
+  local: {
+    mapsLink: boolean;            // link or <iframe> embed pointing at Google Maps
+    telLinks: number;             // tel: links (click-to-call — a NAP signal)
+    addressInSchema: boolean;     // "address" anywhere in this page's JSON-LD
+    geoInSchema: boolean;         // "geo" coordinates in JSON-LD
+    openingHoursInSchema: boolean;
+    telephoneInSchema: boolean;
+  };
   fetchedAtMs: number;
 }
 
@@ -194,6 +203,7 @@ export function extractPageSignals(url: string, status: number, html: string): P
   const questionHeadings = headings.filter((h) => /\?\s*$|^(how|what|why|when|where|which|who|can|does|is|are|should)\b/i.test(h.text)).length;
 
   const jsonLdTypes: string[] = [];
+  const ldKeys = new Set<string>(); // every key seen anywhere in this page's JSON-LD (deep)
   for (const m of html.matchAll(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
     try {
       const collect = (node: any) => {
@@ -202,7 +212,7 @@ export function extractPageSignals(url: string, status: number, html: string): P
         const t = node["@type"];
         if (typeof t === "string") jsonLdTypes.push(t);
         else if (Array.isArray(t)) t.forEach((x) => typeof x === "string" && jsonLdTypes.push(x));
-        for (const k of ["@graph", "mainEntity", "itemListElement"]) if (node[k]) collect(node[k]);
+        for (const k of Object.keys(node)) { ldKeys.add(k.toLowerCase()); collect(node[k]); }
       };
       collect(JSON.parse(m[1].trim()));
     } catch { /* malformed ld+json is itself a (minor) finding the model can infer from absence */ }
@@ -211,13 +221,19 @@ export function extractPageSignals(url: string, status: number, html: string): P
   const imgs = [...html.matchAll(/<img\b[^>]*>/gi)].map((m) => m[0]);
   const imgMissingAlt = imgs.filter((t) => { const a = attr(t, "alt"); return a === null || a.trim() === ""; }).length;
 
-  let internalLinks = 0, externalLinks = 0;
+  let internalLinks = 0, externalLinks = 0, telLinks = 0;
+  const MAPS_RE = /(?:google\.[a-z.]+\/maps|maps\.google\.|goo\.gl\/maps|maps\.app\.goo\.gl)/i;
+  let mapsLink = false;
   const origin = new URL(url).origin;
   for (const m of html.matchAll(/<a\b[^>]*\bhref\s*=\s*("([^"]*)"|'([^']*)')/gi)) {
     const href = m[2] ?? m[3] ?? "";
-    if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("javascript:") || href.startsWith("tel:")) continue;
+    if (href.startsWith("tel:")) { telLinks++; continue; }
+    if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("javascript:")) continue;
+    if (MAPS_RE.test(href)) mapsLink = true;
     try { (new URL(href, url).origin === origin ? internalLinks++ : externalLinks++); } catch {}
   }
+  // An embedded map counts the same as a link out to one.
+  if (!mapsLink && /<iframe\b[^>]*src\s*=\s*["'][^"']*(?:google\.[a-z.]+\/maps|maps\.google\.)/i.test(html)) mapsLink = true;
 
   const bodyText = strip(html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<!--[\s\S]*?-->/g, " "));
   const hasFaqMarkup = jsonLdTypes.some((t) => /faqpage|question/i.test(t)) || /<details\b[^>]*>[\s\S]*?<summary\b/i.test(html);
@@ -238,6 +254,13 @@ export function extractPageSignals(url: string, status: number, html: string): P
     internalLinks, externalLinks,
     wordCount: bodyText ? bodyText.split(" ").length : 0,
     hreflangCount, hasFaqMarkup,
+    local: {
+      mapsLink, telLinks,
+      addressInSchema: ldKeys.has("address"),
+      geoInSchema: ldKeys.has("geo"),
+      openingHoursInSchema: ldKeys.has("openinghours") || ldKeys.has("openinghoursspecification"),
+      telephoneInSchema: ldKeys.has("telephone"),
+    },
     fetchedAtMs: Date.now(),
   };
 }
@@ -477,6 +500,7 @@ Use EXACTLY these categories, in this order:
 - content ("Content & Heading Structure"): H1 hygiene, heading outline quality, word counts, thin pages, question-shaped headings, answer-first structure.
 - structured-data ("Structured Data"): schema.org coverage (Organization, Article, FAQPage, Product, BreadcrumbList…), FAQ markup.
 - aeo-readiness ("Answer Engine Readiness"): citability (dates/authors evident in schema), FAQ/Q&A coverage, content likely accessible without JS (low word counts on pages suggest JS-rendered content), hreflang/internationalization.
+- local-presence ("Local Presence & Google Maps"): Google Maps is a major traffic channel for businesses with a physical or service presence. Judge from each page's "local" signals: LocalBusiness (or subtype) schema with address, geo coordinates, telephone and opening hours; a Google Maps link or embed; tel: click-to-call links. We cannot query Google Maps itself, so frame findings as site-side readiness for Google Business Profile / Maps ranking, and when signals are weak recommend claiming a Google Business Profile, linking it from the site, and adding complete LocalBusiness schema. If the site is clearly online-only (no physical presence implied anywhere), say exactly that in one pass finding, score the category 100, and do not pad it with irrelevant failures.
 
 Rules:
 - Ground every finding in the provided signals; cite concrete numbers and page URLs from the data. Never invent facts about the site.

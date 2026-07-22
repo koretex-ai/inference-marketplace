@@ -117,6 +117,11 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "";
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL ?? "deepseek/deepseek-v4-pro";
 // Regeneration ceiling per wallet per day (same site only — a different site is refused outright).
 const AEO_RUNS_PER_DAY = Number(process.env.AEO_RUNS_PER_DAY ?? 3);
+// Wallets exempt from BOTH the one-site lock and the daily cap (comma-separated pubkeys, e.g.
+// the operator generating example reports / case studies). ADMIN_WALLET is always included.
+const AEO_UNLIMITED_WALLETS = new Set(
+  [ADMIN_WALLET, ...(process.env.AEO_UNLIMITED_WALLETS ?? "").split(",")].map((s) => s.trim()).filter(Boolean),
+);
 
 /** Credits issued for a USDC amount (base units, 6 decimals), floored. */
 function creditsFor(usdcRaw: number): number {
@@ -273,10 +278,10 @@ async function runAeoJob(job: AeoJob): Promise<void> {
     job.phase = "generating report";
     const { report, model } = await generateAeoReport(signals, { apiKey: OPENROUTER_API_KEY, model: OPENROUTER_MODEL });
     const now = Date.now();
-    const existing = await aeoStore.forWallet(job.wallet);
+    // created_at is set once per (wallet, site) — both stores preserve it on re-runs.
     await aeoStore.save({
       wallet: job.wallet, site: job.site, url: job.url, report, model,
-      createdAt: existing?.createdAt ?? now, updatedAt: now,
+      createdAt: now, updatedAt: now,
     });
     job.report = report;
     job.status = "done";
@@ -1611,11 +1616,14 @@ function handleHttp(req: http.IncomingMessage, res: http.ServerResponse) {
       try { target = normalizeSiteUrl(String(b.url ?? "")); }
       catch (e: any) { return json(res, 400, { error: { message: e.message } }); }
       const site = target.hostname.replace(/^www\./, "");
-      const existing = await aeoStore.forWallet(pubkey);
-      if (existing && existing.site !== site)
-        return json(res, 403, { error: { message: `your free review is already used for ${existing.site} — you can re-run that site, but reviewing a second site isn't available yet`, lockedSite: existing.site } });
+      const unlimited = AEO_UNLIMITED_WALLETS.has(pubkey);
+      if (!unlimited) {
+        const existing = await aeoStore.forWallet(pubkey);
+        if (existing && existing.site !== site)
+          return json(res, 403, { error: { message: `your free review is already used for ${existing.site} — you can re-run that site, but reviewing a second site isn't available yet`, lockedSite: existing.site } });
+      }
       const runs = (aeoRuns.get(pubkey) ?? []).filter((t) => t > Date.now() - 86_400_000);
-      if (runs.length >= AEO_RUNS_PER_DAY)
+      if (!unlimited && runs.length >= AEO_RUNS_PER_DAY)
         return json(res, 429, { error: { message: `daily limit reached (${AEO_RUNS_PER_DAY} runs) — try again tomorrow` } });
       // One in-flight job per wallet — a second submit re-attaches to the running one.
       for (const j of aeoJobs.values()) {
